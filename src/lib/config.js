@@ -1,0 +1,133 @@
+"use strict";
+
+const path = require("path");
+
+const { envString, envInt, envBool, toInt, toBool } = require("./env");
+const { slug } = require("./util");
+
+function resourceSelector(serverConfig) {
+  if (serverConfig.pid) return `pid:${serverConfig.pid}`;
+  if (serverConfig.processPort) return `port:${serverConfig.processPort}`;
+  if (serverConfig.processName) return `name:${serverConfig.processName}`;
+  return "none";
+}
+
+function normalizeServerConfig(item, index) {
+  const id = slug(item.id || item.name || `server-${index + 1}`);
+  const port = toInt(item.port, index === 1 ? 2000 : 25565);
+  const pid = toInt(item.pid || item.processPid, 0) || null;
+  const processPort = toInt(item.processPort, port) || null;
+  const logPath = item.logPath ? String(item.logPath) : "";
+  const worldPath = item.worldPath ? String(item.worldPath) : "";
+  const rconHost = item.rconHost ? String(item.rconHost) : "";
+  const rconPort = toInt(item.rconPort, 0) || null;
+  const rconPassword = item.rconPassword ? String(item.rconPassword) : "";
+  return {
+    id,
+    name: String(item.name || id),
+    host: String(item.host || "127.0.0.1"),
+    port,
+    protocolVersion: toInt(item.protocolVersion, envInt("MC_PROTOCOL_VERSION", 767)),
+    queryEnabled: toBool(item.queryEnabled, false),
+    queryHost: String(item.queryHost || item.host || "127.0.0.1"),
+    queryPort: toInt(item.queryPort, port),
+    processName: item.processName ? String(item.processName) : "",
+    pid,
+    processPort,
+    logBackfillEnabled: toBool(item.logBackfillEnabled, false),
+    logPath,
+    logBackfillMaxFiles: Math.max(1, toInt(item.logBackfillMaxFiles, envInt("LOG_BACKFILL_MAX_FILES", 80))),
+    logBackfillMaxSessionHours: Math.max(1, toInt(item.logBackfillMaxSessionHours, envInt("LOG_BACKFILL_MAX_SESSION_HOURS", 24))),
+    worldPath,
+    rconEnabled: toBool(item.rconEnabled, Boolean(rconPort && rconPassword)),
+    rconHost: rconHost || String(item.host || "127.0.0.1"),
+    rconPort,
+    rconPassword,
+    resourceMode: pid ? "pid" : processPort ? "port" : item.processName ? "name" : "none"
+  };
+}
+
+function loadServerConfigs() {
+  const raw = envString("SERVERS", "");
+  if (raw) {
+    try {
+      const parsed = JSON.parse(raw);
+      if (!Array.isArray(parsed) || parsed.length === 0) {
+        throw new Error("SERVERS must be a non-empty JSON array.");
+      }
+      return parsed.map((item, index) => normalizeServerConfig(item, index));
+    } catch (error) {
+      throw new Error(`Invalid SERVERS config: ${error.message}`);
+    }
+  }
+
+  return [normalizeServerConfig({
+    id: envString("MC_ID", "default"),
+    name: envString("MC_NAME", "Minecraft Server"),
+    host: envString("MC_HOST", "127.0.0.1"),
+    port: envInt("MC_PORT", 25565),
+    protocolVersion: envInt("MC_PROTOCOL_VERSION", 767),
+    queryEnabled: envBool("MC_QUERY_ENABLED", false),
+    queryHost: envString("MC_QUERY_HOST", envString("MC_HOST", "127.0.0.1")),
+    queryPort: envInt("MC_QUERY_PORT", envInt("MC_PORT", 25565)),
+    processName: envString("MC_PROCESS_NAME", ""),
+    pid: envInt("MC_PROCESS_PID", 0) || null,
+    processPort: envInt("MC_PROCESS_PORT", envInt("MC_PORT", 25565)),
+    logBackfillEnabled: envBool("MC_LOG_BACKFILL_ENABLED", false),
+    logPath: envString("MC_LOG_PATH", ""),
+    logBackfillMaxFiles: envInt("MC_LOG_BACKFILL_MAX_FILES", envInt("LOG_BACKFILL_MAX_FILES", 80)),
+    logBackfillMaxSessionHours: envInt("MC_LOG_BACKFILL_MAX_SESSION_HOURS", envInt("LOG_BACKFILL_MAX_SESSION_HOURS", 24)),
+    worldPath: envString("MC_WORLD_PATH", ""),
+    rconEnabled: envBool("MC_RCON_ENABLED", false),
+    rconHost: envString("MC_RCON_HOST", ""),
+    rconPort: envInt("MC_RCON_PORT", 0),
+    rconPassword: envString("MC_RCON_PASSWORD", "")
+  }, 0)];
+}
+
+function publicServerConfig(serverConfig) {
+  return {
+    id: serverConfig.id,
+    name: serverConfig.name,
+    host: serverConfig.host,
+    port: serverConfig.port,
+    queryEnabled: serverConfig.queryEnabled,
+    queryPort: serverConfig.queryPort,
+    processName: serverConfig.processName || null,
+    pid: serverConfig.pid,
+    processPort: serverConfig.processPort,
+    logBackfillEnabled: serverConfig.logBackfillEnabled,
+    logPath: serverConfig.logPath || null,
+    worldPath: serverConfig.worldPath || null,
+    rconEnabled: serverConfig.rconEnabled,
+    resourceMode: serverConfig.resourceMode
+  };
+}
+
+function loadAppConfig(rootDir) {
+  return {
+    appName: envString("APP_NAME", "Minecraft Server Monitor"),
+    host: envString("HOST", "0.0.0.0"),
+    port: envInt("PORT", envInt("HTTP_PORT", 3000)),
+    mcProtocolVersion: envInt("MC_PROTOCOL_VERSION", 767),
+    pingTimeoutMs: envInt("PING_TIMEOUT_MS", 3500),
+    pollIntervalMs: Math.max(5000, envInt("POLL_INTERVAL_MS", 15000)),
+    dataDir: path.resolve(rootDir, envString("DATA_DIR", "./data")),
+    historyLimit: Math.max(24, envInt("HISTORY_LIMIT", 240)),
+    logBackfillMaxFiles: Math.max(1, envInt("LOG_BACKFILL_MAX_FILES", 80)),
+    logBackfillMaxSessionHours: Math.max(1, envInt("LOG_BACKFILL_MAX_SESSION_HOURS", 24)),
+    authToken: envString("AUTH_TOKEN", ""),
+    sseEnabled: envBool("SSE_ENABLED", true),
+    staleSessionMultiplier: Math.max(2, envInt("STALE_SESSION_POLL_MULTIPLIER", 4)),
+    rconTimeoutMs: envInt("RCON_TIMEOUT_MS", 3000),
+    servers: loadServerConfigs()
+  };
+}
+
+module.exports = {
+  loadAppConfig,
+  loadServerConfigs,
+  normalizeServerConfig,
+  publicServerConfig,
+  resourceSelector
+};

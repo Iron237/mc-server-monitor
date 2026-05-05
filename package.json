@@ -1,11 +1,12 @@
 {
   "name": "mc-server-monitor",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "Minecraft server status and resource monitoring dashboard.",
   "main": "src/server.js",
   "scripts": {
     "start": "node src/server.js",
-    "dev": "node src/server.js"
+    "dev": "node src/server.js",
+    "test": "node --test \"test/*.test.js\""
   },
   "keywords": [
     "minecraft",
