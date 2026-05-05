@@ -1,0 +1,125 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Minecraft Server Monitor</title>
+    <link rel="stylesheet" href="/styles.css">
+  </head>
+  <body>
+    <main class="shell">
+      <header class="topbar">
+        <div>
+          <p class="eyebrow">Minecraft Monitor</p>
+          <h1 id="appName">服务器状态</h1>
+          <div class="target" id="targetAddress">--</div>
+        </div>
+        <div class="topbar-actions">
+          <div class="status-pill" id="statusPill">
+            <span class="status-dot"></span>
+            <span id="statusText">启动中</span>
+          </div>
+          <button class="icon-button" id="refreshButton" title="刷新">
+            <span aria-hidden="true">↻</span>
+          </button>
+        </div>
+      </header>
+
+      <section class="metric-grid" aria-label="核心指标">
+        <article class="metric">
+          <span class="metric-label">在线状态</span>
+          <strong id="onlineMetric">--</strong>
+          <small id="motdMetric">等待采样</small>
+        </article>
+        <article class="metric">
+          <span class="metric-label">连接延迟</span>
+          <strong id="latencyMetric">--</strong>
+          <small id="connectionMetric">--</small>
+        </article>
+        <article class="metric">
+          <span class="metric-label">在线玩家</span>
+          <strong id="playersMetric">--</strong>
+          <small id="trackingMetric">--</small>
+        </article>
+        <article class="metric">
+          <span class="metric-label">主机资源</span>
+          <strong id="resourceMetric">--</strong>
+          <small id="memoryMetric">--</small>
+        </article>
+      </section>
+
+      <section class="dashboard-grid">
+        <article class="panel panel-wide">
+          <div class="panel-header">
+            <div>
+              <h2>连接趋势</h2>
+              <p id="versionLine">--</p>
+            </div>
+            <div class="updated" id="updatedAt">--</div>
+          </div>
+          <canvas id="historyChart" height="190"></canvas>
+        </article>
+
+        <article class="panel">
+          <div class="panel-header">
+            <div>
+              <h2>系统资源</h2>
+              <p id="hostLine">--</p>
+            </div>
+          </div>
+          <div class="resource-list">
+            <div class="bar-row">
+              <div class="bar-label"><span>CPU</span><strong id="cpuValue">--</strong></div>
+              <div class="bar"><span id="cpuBar"></span></div>
+            </div>
+            <div class="bar-row">
+              <div class="bar-label"><span>内存</span><strong id="ramValue">--</strong></div>
+              <div class="bar"><span id="ramBar"></span></div>
+            </div>
+            <div class="bar-row">
+              <div class="bar-label"><span>磁盘</span><strong id="diskValue">--</strong></div>
+              <div class="bar"><span id="diskBar"></span></div>
+            </div>
+          </div>
+          <div class="process-list" id="processList"></div>
+        </article>
+
+        <article class="panel panel-wide">
+          <div class="panel-header">
+            <div>
+              <h2>在线玩家</h2>
+              <p id="onlinePlayersLine">--</p>
+            </div>
+          </div>
+          <div class="table-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th>玩家</th>
+                  <th>本次在线</th>
+                  <th>累计在线</th>
+                  <th>会话</th>
+                </tr>
+              </thead>
+              <tbody id="onlinePlayersTable">
+                <tr><td colspan="4">等待数据</td></tr>
+              </tbody>
+            </table>
+          </div>
+        </article>
+
+        <article class="panel">
+          <div class="panel-header">
+            <div>
+              <h2>在线时长榜</h2>
+              <p id="leaderboardLine">--</p>
+            </div>
+          </div>
+          <div class="leaderboard" id="leaderboard"></div>
+        </article>
+      </section>
+    </main>
+
+    <script src="/app.js"></script>
+  </body>
+</html>
