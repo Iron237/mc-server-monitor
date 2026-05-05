@@ -181,7 +181,11 @@ function renderResources(payload, selected) {
 }
 
 function renderPlayers(players, tracking, reportedCount) {
-  elements.onlinePlayersLine.textContent = `${players.online.length} 名已识别 · ${trackingText(tracking)}`;
+  const selected = getSelectedServer();
+  const backfill = selected && selected.backfill && selected.backfill.enabled
+    ? ` · 日志回填 ${selected.backfill.ok ? `本轮 ${selected.backfill.importedSessions} 段` : "失败"}`
+    : "";
+  elements.onlinePlayersLine.textContent = `${players.online.length} 名已识别 · ${trackingText(tracking)}${backfill}`;
 
   if (!players.online.length) {
     const message = reportedCount > 0

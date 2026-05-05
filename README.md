@@ -32,7 +32,7 @@ http://localhost:3000
 主要配置写在 `.env` 的 `SERVERS` 里。示例中第二个服务器端口是 `2000`：
 
 ```env
-SERVERS=[{"id":"server1","name":"生存服","host":"127.0.0.1","port":25565,"queryEnabled":true,"queryHost":"127.0.0.1","queryPort":25565,"processPort":25565},{"id":"server2","name":"服务器2","host":"127.0.0.1","port":2000,"queryEnabled":true,"queryHost":"127.0.0.1","queryPort":2000,"processPort":2000}]
+SERVERS=[{"id":"server1","name":"生存服","host":"127.0.0.1","port":25565,"queryEnabled":true,"queryHost":"127.0.0.1","queryPort":25565,"processPort":25565,"logBackfillEnabled":true,"logPath":"G:/临时处理"},{"id":"server2","name":"服务器2","host":"127.0.0.1","port":2000,"queryEnabled":true,"queryHost":"127.0.0.1","queryPort":2000,"processPort":2000}]
 ```
 
 每个服务器对象支持：
@@ -48,7 +48,9 @@ SERVERS=[{"id":"server1","name":"生存服","host":"127.0.0.1","port":25565,"que
   "queryPort": 2000,
   "pid": 12345,
   "processPort": 2000,
-  "processName": "java"
+  "processName": "java",
+  "logBackfillEnabled": true,
+  "logPath": "G:/临时处理"
 }
 ```
 
@@ -85,6 +87,51 @@ query.port=2000
 ```
 
 如果没有开启 Query，面板仍会显示服务器在线状态、连接延迟和在线人数；玩家时长只能基于服务器状态样本估算，或者无法按玩家统计。
+
+## 日志回填在线时长
+
+如果之前没有开启 Query 或监控程序没有运行，可以用服务端日志补回一部分在线时长。程序会扫描 `.log` 和 `.log.gz`，匹配玩家上线和下线事件，把两者时间相减后合并到累计在线时长。
+
+已支持这些 NeoForge/Minecraft 日志事件：
+
+```text
+Kang62 logged in with entity id ...
+Kang62 joined the game
+IronGod777 lost connection: Disconnected
+IronGod777 left the game
+```
+
+已支持你当前日志里的时间格式：
+
+```text
+[045月2026 18:50:01.323]
+[0452026 19:07:26.869]
+```
+
+上面两种都会按 `2026-05-04` 解析。
+
+配置方式：
+
+```json
+{"logBackfillEnabled":true,"logPath":"G:/临时处理"}
+```
+
+你的日志目录可以直接配置为：
+
+```json
+{"logBackfillEnabled":true,"logPath":"Y:/Users/123/Desktop/航空学server/logs"}
+```
+
+Windows 路径建议在 JSON 里用 `/`，避免反斜杠转义问题。已导入的会话会记录到 `data/player-stats.json`，后续重复扫描不会重复累加。
+
+默认限制：
+
+```env
+LOG_BACKFILL_MAX_FILES=80
+LOG_BACKFILL_MAX_SESSION_HOURS=24
+```
+
+`LOG_BACKFILL_MAX_SESSION_HOURS` 用来避免服务器崩溃、日志缺失下线记录时产生异常超长会话。你提供的 NeoForge 日志时间戳格式 `[264月2026 11:48:55.373]` 已支持。
 
 ## API
 
