@@ -14,6 +14,8 @@ const elements = {
   trackingMetric: document.querySelector("#trackingMetric"),
   resourceMetric: document.querySelector("#resourceMetric"),
   memoryMetric: document.querySelector("#memoryMetric"),
+  serverGrid: document.querySelector("#serverGrid"),
+  selectedTitle: document.querySelector("#selectedTitle"),
   versionLine: document.querySelector("#versionLine"),
   updatedAt: document.querySelector("#updatedAt"),
   hostLine: document.querySelector("#hostLine"),
@@ -33,29 +35,29 @@ const elements = {
 
 let refreshTimer = null;
 let latestPayload = null;
+let selectedServerId = null;
 
 elements.refreshButton.addEventListener("click", () => fetchStatus(true));
 window.addEventListener("resize", () => {
-  if (latestPayload) {
-    drawHistory(latestPayload.history || []);
-  }
+  const selected = getSelectedServer();
+  if (selected) drawHistory(selected.history || []);
 });
 
 fetchStatus(false);
 
 async function fetchStatus(manual) {
-  if (manual) {
-    elements.refreshButton.disabled = true;
-  }
+  if (manual) elements.refreshButton.disabled = true;
   try {
     const response = await fetch("/api/status", { cache: "no-store" });
-    if (!response.ok) {
-      throw new Error(`HTTP ${response.status}`);
-    }
+    if (!response.ok) throw new Error(`HTTP ${response.status}`);
     const payload = await response.json();
     latestPayload = payload;
+    if (!selectedServerId && payload.servers.length) selectedServerId = payload.servers[0].id;
+    if (!payload.servers.some((item) => item.id === selectedServerId) && payload.servers.length) {
+      selectedServerId = payload.servers[0].id;
+    }
     render(payload);
-    scheduleRefresh(payload.target.pollIntervalMs);
+    scheduleRefresh(payload.pollIntervalMs);
   } catch (error) {
     renderError(error);
     scheduleRefresh(10000);
@@ -65,57 +67,84 @@ async function fetchStatus(manual) {
 }
 
 function scheduleRefresh(intervalMs) {
-  if (refreshTimer) {
-    clearTimeout(refreshTimer);
-  }
+  if (refreshTimer) clearTimeout(refreshTimer);
   refreshTimer = setTimeout(() => fetchStatus(false), Math.max(5000, intervalMs || 15000));
 }
 
 function render(payload) {
-  const server = payload.server;
-  const target = payload.target;
-  const resources = payload.resources || {};
-  const system = resources.system || {};
-  const players = payload.players || { online: [], leaderboard: [] };
+  const selected = getSelectedServer();
+  const system = payload.resources.system || {};
+  const summary = payload.summary || { servers: 0, onlineServers: 0, playersOnline: 0 };
 
-  elements.appName.textContent = payload.app.name || "服务器状态";
-  elements.targetAddress.textContent = `${target.host}:${target.port}`;
-  elements.statusPill.classList.toggle("online", server.online);
-  elements.statusPill.classList.toggle("offline", !server.online);
-  elements.statusText.textContent = server.online ? "在线" : "离线";
+  elements.appName.textContent = payload.app.name || "服务器集群状态";
+  elements.targetAddress.textContent = payload.servers.map((item) => `${item.name} ${item.config.host}:${item.config.port}`).join(" · ");
+  elements.statusPill.classList.toggle("online", summary.onlineServers > 0);
+  elements.statusPill.classList.toggle("offline", summary.onlineServers === 0);
+  elements.statusText.textContent = `${summary.onlineServers}/${summary.servers} 在线`;
 
-  elements.onlineMetric.textContent = server.online ? "在线" : "离线";
-  elements.motdMetric.textContent = server.motd || server.error || "无 MOTD";
-  elements.latencyMetric.textContent = server.latencyMs === null ? "--" : `${server.latencyMs} ms`;
-  elements.connectionMetric.textContent = server.online
-    ? `最近成功 ${formatDateTime(payload.connection.lastSuccessAt)}`
-    : `失败 ${payload.connection.consecutiveFailures} 次`;
+  elements.onlineMetric.textContent = `${summary.onlineServers}/${summary.servers}`;
+  elements.motdMetric.textContent = selected ? `${selected.name}: ${selected.server.motd || selected.server.error || "无 MOTD"}` : "没有服务器";
+  elements.latencyMetric.textContent = selected && selected.server.latencyMs !== null ? `${selected.server.latencyMs} ms` : "--";
+  elements.connectionMetric.textContent = selected && selected.server.online
+    ? `最近成功 ${formatDateTime(selected.connection.lastSuccessAt)}`
+    : selected ? `失败 ${selected.connection.consecutiveFailures} 次` : "--";
 
-  const count = Number.isFinite(server.playersOnline) ? server.playersOnline : players.online.length;
-  const max = Number.isFinite(server.playersMax) ? server.playersMax : null;
-  elements.playersMetric.textContent = max === null ? `${count ?? "--"}` : `${count}/${max}`;
-  elements.trackingMetric.textContent = trackingText(payload.tracking);
-
+  elements.playersMetric.textContent = `${summary.playersOnline}`;
+  elements.trackingMetric.textContent = selected ? trackingText(selected.tracking) : "--";
   elements.resourceMetric.textContent = percentText(system.cpuPercent);
   elements.memoryMetric.textContent = `内存 ${percentText(system.memoryUsedPercent)}`;
-  elements.versionLine.textContent = server.version
-    ? `${server.version}${server.protocol ? ` · protocol ${server.protocol}` : ""}`
-    : "暂无版本信息";
-  elements.updatedAt.textContent = payload.lastUpdatedAt
-    ? `更新 ${formatDateTime(payload.lastUpdatedAt)}`
-    : "等待更新";
 
-  renderResources(payload);
-  renderPlayers(players, payload.tracking, count);
-  drawHistory(payload.history || []);
+  renderServerCards(payload.servers);
+  renderSelected(selected, payload);
 }
 
-function renderResources(payload) {
-  const system = payload.resources.system || {};
-  elements.hostLine.textContent = system.hostname
-    ? `${system.hostname} · ${system.platform}`
-    : "等待资源采样";
+function renderServerCards(servers) {
+  elements.serverGrid.innerHTML = servers.map((item) => {
+    const count = Number.isFinite(item.server.playersOnline) ? item.server.playersOnline : item.players.online.length;
+    const max = Number.isFinite(item.server.playersMax) ? item.server.playersMax : null;
+    return `
+      <button class="server-card ${item.id === selectedServerId ? "selected" : ""}" data-server-id="${escapeHtml(item.id)}">
+        <span class="server-card-top">
+          <strong>${escapeHtml(item.name)}</strong>
+          <span class="mini-status ${item.server.online ? "online" : "offline"}">${item.server.online ? "在线" : "离线"}</span>
+        </span>
+        <span>${escapeHtml(item.config.host)}:${item.config.port}</span>
+        <span>玩家 ${max === null ? count : `${count}/${max}`} · 延迟 ${item.server.latencyMs === null ? "--" : `${item.server.latencyMs} ms`}</span>
+        <span>资源 ${escapeHtml(item.resources.selector || "none")}</span>
+      </button>
+    `;
+  }).join("");
 
+  elements.serverGrid.querySelectorAll(".server-card").forEach((button) => {
+    button.addEventListener("click", () => {
+      selectedServerId = button.dataset.serverId;
+      render(latestPayload);
+    });
+  });
+}
+
+function renderSelected(selected, payload) {
+  if (!selected) return;
+  const system = payload.resources.system || {};
+  const players = selected.players || { online: [], leaderboard: [] };
+
+  elements.selectedTitle.textContent = `${selected.name} 连接趋势`;
+  elements.versionLine.textContent = selected.server.version
+    ? `${selected.server.version}${selected.server.protocol ? ` · protocol ${selected.server.protocol}` : ""}`
+    : "暂无版本信息";
+  elements.updatedAt.textContent = selected.lastUpdatedAt ? `更新 ${formatDateTime(selected.lastUpdatedAt)}` : "等待更新";
+
+  renderResources(payload, selected);
+  renderPlayers(players, selected.tracking, selected.server.playersOnline || 0);
+  drawHistory(selected.history || []);
+
+  elements.hostLine.textContent = system.hostname
+    ? `${system.hostname} · ${system.platform} · ${selected.resources.selector}`
+    : `资源识别：${selected.resources.selector}`;
+}
+
+function renderResources(payload, selected) {
+  const system = payload.resources.system || {};
   setBar(elements.cpuValue, elements.cpuBar, system.cpuPercent);
   setBar(elements.ramValue, elements.ramBar, system.memoryUsedPercent);
 
@@ -127,23 +156,28 @@ function renderResources(payload) {
     elements.diskBar.style.width = "0%";
   }
 
-  const processes = payload.resources.processes || [];
+  const processes = selected.resources.processes || [];
   if (!processes.length) {
-    const processName = payload.target.processName;
-    elements.processList.innerHTML = processName
-      ? `<div class="empty">未找到进程：${escapeHtml(processName)}</div>`
-      : `<div class="empty">未配置进程名</div>`;
+    elements.processList.innerHTML = `<div class="empty">未找到匹配进程：${escapeHtml(selected.resources.selector || "none")}</div>`;
     return;
   }
 
-  elements.processList.innerHTML = processes.map((process) => `
+  const totalMemory = processes.reduce((sum, item) => sum + (Number.isFinite(item.memoryBytes) ? item.memoryBytes : 0), 0);
+  const totalCpu = processes.reduce((sum, item) => sum + (Number.isFinite(item.cpuPercent) ? item.cpuPercent : 0), 0);
+  elements.processList.innerHTML = `
     <div class="process-item">
-      <strong>${escapeHtml(process.name)} · PID ${process.pid}</strong>
-      <div class="process-meta">
-        CPU ${percentText(process.cpuPercent)} · 内存 ${formatBytes(process.memoryBytes)}
-      </div>
+      <strong>匹配进程 ${processes.length} 个</strong>
+      <div class="process-meta">CPU ${percentText(totalCpu)} · 内存 ${formatBytes(totalMemory)}</div>
     </div>
-  `).join("");
+    ${processes.map((process) => `
+      <div class="process-item">
+        <strong>${escapeHtml(process.name)} · PID ${process.pid}</strong>
+        <div class="process-meta">
+          CPU ${percentText(process.cpuPercent)} · 内存 ${formatBytes(process.memoryBytes)}
+        </div>
+      </div>
+    `).join("")}
+  `;
 }
 
 function renderPlayers(players, tracking, reportedCount) {
@@ -242,13 +276,15 @@ function drawLine(ctx, history, xFor, yFor, color) {
   history.forEach((point, index) => {
     const x = xFor(index);
     const y = yFor(point);
-    if (index === 0) {
-      ctx.moveTo(x, y);
-    } else {
-      ctx.lineTo(x, y);
-    }
+    if (index === 0) ctx.moveTo(x, y);
+    else ctx.lineTo(x, y);
   });
   ctx.stroke();
+}
+
+function getSelectedServer() {
+  if (!latestPayload) return null;
+  return latestPayload.servers.find((item) => item.id === selectedServerId) || latestPayload.servers[0] || null;
 }
 
 function renderError(error) {
@@ -267,25 +303,15 @@ function setBar(valueElement, barElement, value) {
 }
 
 function trackingText(tracking) {
-  if (!tracking) {
-    return "--";
-  }
-  if (tracking.accuracy === "full") {
-    return "完整玩家列表";
-  }
-  if (tracking.accuracy === "partial") {
-    return "样本统计";
-  }
-  if (tracking.accuracy === "count-only") {
-    return "仅人数";
-  }
+  if (!tracking) return "--";
+  if (tracking.accuracy === "full") return "完整玩家列表";
+  if (tracking.accuracy === "partial") return "样本统计";
+  if (tracking.accuracy === "count-only") return "仅人数";
   return "未统计";
 }
 
 function formatDateTime(value) {
-  if (!value) {
-    return "--";
-  }
+  if (!value) return "--";
   return new Intl.DateTimeFormat("zh-CN", {
     hour: "2-digit",
     minute: "2-digit",
@@ -294,26 +320,18 @@ function formatDateTime(value) {
 }
 
 function formatDuration(ms) {
-  if (!Number.isFinite(ms) || ms <= 0) {
-    return "0 分钟";
-  }
+  if (!Number.isFinite(ms) || ms <= 0) return "0 分钟";
   const totalMinutes = Math.floor(ms / 60000);
   const days = Math.floor(totalMinutes / 1440);
   const hours = Math.floor((totalMinutes % 1440) / 60);
   const minutes = totalMinutes % 60;
-  if (days > 0) {
-    return `${days} 天 ${hours} 小时`;
-  }
-  if (hours > 0) {
-    return `${hours} 小时 ${minutes} 分钟`;
-  }
+  if (days > 0) return `${days} 天 ${hours} 小时`;
+  if (hours > 0) return `${hours} 小时 ${minutes} 分钟`;
   return `${minutes} 分钟`;
 }
 
 function formatBytes(bytes) {
-  if (!Number.isFinite(bytes)) {
-    return "--";
-  }
+  if (!Number.isFinite(bytes)) return "--";
   const units = ["B", "KB", "MB", "GB", "TB"];
   let value = bytes;
   let index = 0;
