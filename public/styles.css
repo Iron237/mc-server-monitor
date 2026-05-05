@@ -329,6 +329,96 @@ h2 {
   margin-top: 18px;
 }
 
+.sync-button {
+  min-height: 34px;
+  padding: 0 13px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--surface);
+  color: var(--ink);
+  cursor: pointer;
+  font: inherit;
+  font-size: 14px;
+  font-weight: 700;
+}
+
+.sync-button:hover {
+  border-color: #94b5a7;
+}
+
+.sync-button:disabled {
+  cursor: wait;
+  opacity: 0.65;
+}
+
+.backfill-box {
+  display: grid;
+  gap: 10px;
+  margin-bottom: 14px;
+  padding: 12px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: #fbfcfc;
+}
+
+.backfill-summary {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  color: var(--muted);
+  font-size: 13px;
+}
+
+.log-list {
+  display: grid;
+  gap: 8px;
+  max-height: 180px;
+  overflow: auto;
+}
+
+.log-item {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 8px;
+  align-items: center;
+  padding: 8px 0;
+  border-top: 1px solid var(--line);
+  font-size: 13px;
+}
+
+.log-name {
+  overflow-wrap: anywhere;
+  font-weight: 700;
+}
+
+.log-meta {
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.log-status {
+  display: inline-flex;
+  align-items: center;
+  min-height: 24px;
+  padding: 0 8px;
+  border-radius: 999px;
+  background: rgba(28, 143, 90, 0.12);
+  color: var(--green);
+  font-weight: 700;
+  white-space: nowrap;
+}
+
+.log-status.pending {
+  background: rgba(183, 121, 31, 0.14);
+  color: var(--amber);
+}
+
+.log-status.error {
+  background: rgba(191, 61, 50, 0.14);
+  color: var(--red);
+}
+
 .process-item {
   display: grid;
   gap: 4px;

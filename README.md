@@ -124,6 +124,13 @@ IronGod777 left the game
 
 Windows 路径建议在 JSON 里用 `/`，避免反斜杠转义问题。已导入的会话会记录到 `data/player-stats.json`，后续重复扫描不会重复累加。
 
+网页会先扫描日志并显示每个文件的状态；“同步日志”按钮会把当前服务器的未同步完整会话写入累计统计：
+
+- `已同步`：这个日志里可识别的完整上线/下线会话都已经写入统计。
+- `未同步`：这个日志里还有尚未写入的完整会话。
+
+程序启动时会先从 `data/player-stats.json` 恢复排行榜，再开始新的轮询，所以关闭网页服务器后，下一次启动仍会显示上次累计的在线时长。
+
 默认限制：
 
 ```env
@@ -140,6 +147,7 @@ GET /api/status
 GET /api/status/:serverId
 GET /api/players
 GET /api/players/:serverId
+POST /api/backfill/:serverId
 GET /health
 ```
 

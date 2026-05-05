@@ -27,6 +27,8 @@ const elements = {
   diskBar: document.querySelector("#diskBar"),
   processList: document.querySelector("#processList"),
   onlinePlayersLine: document.querySelector("#onlinePlayersLine"),
+  syncLogsButton: document.querySelector("#syncLogsButton"),
+  backfillBox: document.querySelector("#backfillBox"),
   onlinePlayersTable: document.querySelector("#onlinePlayersTable"),
   leaderboardLine: document.querySelector("#leaderboardLine"),
   leaderboard: document.querySelector("#leaderboard"),
@@ -38,6 +40,7 @@ let latestPayload = null;
 let selectedServerId = null;
 
 elements.refreshButton.addEventListener("click", () => fetchStatus(true));
+elements.syncLogsButton.addEventListener("click", () => syncSelectedLogs());
 window.addEventListener("resize", () => {
   const selected = getSelectedServer();
   if (selected) drawHistory(selected.history || []);
@@ -63,6 +66,29 @@ async function fetchStatus(manual) {
     scheduleRefresh(10000);
   } finally {
     elements.refreshButton.disabled = false;
+  }
+}
+
+async function syncSelectedLogs() {
+  const selected = getSelectedServer();
+  if (!selected) return;
+  elements.syncLogsButton.disabled = true;
+  elements.syncLogsButton.textContent = "同步中";
+  try {
+    const response = await fetch(`/api/backfill/${encodeURIComponent(selected.id)}`, {
+      method: "POST",
+      cache: "no-store"
+    });
+    if (!response.ok) throw new Error(`HTTP ${response.status}`);
+    const payload = await response.json();
+    selected.backfill = payload.backfill;
+    selected.players = payload.players;
+    render(latestPayload);
+  } catch (error) {
+    elements.backfillBox.innerHTML = `<div class="empty">日志同步失败：${escapeHtml(error.message)}</div>`;
+  } finally {
+    elements.syncLogsButton.disabled = false;
+    elements.syncLogsButton.textContent = "同步日志";
   }
 }
 
@@ -136,6 +162,7 @@ function renderSelected(selected, payload) {
 
   renderResources(payload, selected);
   renderPlayers(players, selected.tracking, selected.server.playersOnline || 0);
+  renderBackfill(selected);
   drawHistory(selected.history || []);
 
   elements.hostLine.textContent = system.hostname
@@ -177,6 +204,59 @@ function renderResources(payload, selected) {
         </div>
       </div>
     `).join("")}
+  `;
+}
+
+function renderBackfill(selected) {
+  const backfill = selected.backfill || {};
+  elements.syncLogsButton.disabled = !backfill.enabled;
+  if (!backfill.enabled) {
+    elements.backfillBox.innerHTML = `<div class="empty">未启用日志回填</div>`;
+    return;
+  }
+
+  if (!backfill.ok) {
+    elements.backfillBox.innerHTML = `
+      <div class="backfill-summary">
+        <span>日志路径：${escapeHtml(backfill.path || "--")}</span>
+        <span class="log-status error">失败</span>
+      </div>
+      <div class="empty">${escapeHtml(backfill.error || "无法读取日志")}</div>
+    `;
+    return;
+  }
+
+  const files = backfill.files || [];
+  const pending = files.filter((file) => !file.synced).length;
+  const summary = `
+    <div class="backfill-summary">
+      <span>日志路径：${escapeHtml(backfill.path || "--")}</span>
+      <span>${backfill.scannedFiles || 0} 个文件 · ${backfill.parsedSessions || 0} 段会话 · 本轮导入 ${backfill.importedSessions || 0} 段</span>
+    </div>
+  `;
+
+  if (!files.length) {
+    elements.backfillBox.innerHTML = `${summary}<div class="empty">没有扫描到日志文件</div>`;
+    return;
+  }
+
+  elements.backfillBox.innerHTML = `
+    ${summary}
+    <div class="log-list">
+      ${files.map((file) => `
+        <div class="log-item">
+          <div>
+            <div class="log-name">${escapeHtml(file.name)}</div>
+            <div class="log-meta">会话 ${file.parsedSessions} · 已同步 ${file.importedSessions} · 未同步 ${file.pendingSessions} · ${formatDateTime(file.mtime)}</div>
+          </div>
+          <span class="log-status ${file.synced ? "" : "pending"}">${file.synced ? "已同步" : "未同步"}</span>
+        </div>
+      `).join("")}
+    </div>
+    <div class="backfill-summary">
+      <span>${pending === 0 ? "所有可导入会话已同步" : `${pending} 个日志仍有未同步会话`}</span>
+      <span>${backfill.lastImportedAt ? `最近导入 ${formatDateTime(backfill.lastImportedAt)}` : "尚未导入"}</span>
+    </div>
   `;
 }
 

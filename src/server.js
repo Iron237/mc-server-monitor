@@ -50,6 +50,7 @@ let polling = false;
 let started = false;
 
 fs.mkdirSync(config.dataDir, { recursive: true });
+hydratePersistedState(Date.now());
 
 const server = http.createServer(async (request, response) => {
   try {
@@ -92,6 +93,27 @@ const server = http.createServer(async (request, response) => {
       });
       return;
     }
+    if (parsed.pathname.startsWith("/api/backfill/")) {
+      const serverId = decodeURIComponent(parsed.pathname.slice("/api/backfill/".length));
+      const serverState = findServerState(serverId);
+      const serverConfig = findServerConfig(serverId);
+      if (!serverState || !serverConfig) {
+        sendJson(response, 404, { error: "Unknown server id" });
+        return;
+      }
+      if (request.method !== "POST") {
+        sendJson(response, 405, { error: "Use POST to sync log backfill." });
+        return;
+      }
+      serverState.backfill = importLogBackfill(serverState.id, serverConfig, Date.now(), { force: true });
+      updatePlayerViews(serverState, Date.now());
+      persistPlayerStats();
+      sendJson(response, 200, {
+        backfill: serverState.backfill,
+        players: serverState.players
+      });
+      return;
+    }
     if (parsed.pathname === "/health") {
       sendJson(response, 200, {
         ok: true,
@@ -131,6 +153,7 @@ function startServer(callback) {
     if (callback) callback();
     return;
   }
+  hydratePersistedState(Date.now());
   started = true;
   server.listen(config.port, config.host, () => {
     console.log(`${config.appName} listening on http://${config.host}:${config.port}`);
@@ -210,7 +233,7 @@ async function pollServer(serverState, now) {
 
     const observed = chooseObservedPlayers(serverState, statusResult, queryResult);
     updatePlayerDurations(serverState.id, observed, statusResult.online, now);
-    serverState.backfill = importLogBackfill(serverState.id, serverConfig, now);
+    serverState.backfill = importLogBackfill(serverState.id, serverConfig, now, { dryRun: true });
     updatePlayerViews(serverState, now);
 
     serverState.resources = {
@@ -419,7 +442,23 @@ function updatePlayerViews(serverState, now) {
   serverState.players = { online, leaderboard };
 }
 
-function importLogBackfill(serverId, serverConfig, now) {
+function hydratePersistedState(now) {
+  for (const serverState of state.servers) {
+    const stats = ensureServerStats(serverState.id);
+    if (stats.logBackfill) {
+      serverState.backfill = {
+        ...serverState.backfill,
+        ...stats.logBackfill
+      };
+    }
+    updatePlayerViews(serverState, now);
+    if (stats.lastUpdatedAt) {
+      serverState.lastUpdatedAt = stats.lastUpdatedAt;
+    }
+  }
+}
+
+function importLogBackfill(serverId, serverConfig, now, options = {}) {
   if (!serverConfig.logBackfillEnabled || !serverConfig.logPath) {
     return {
       enabled: Boolean(serverConfig.logBackfillEnabled),
@@ -428,6 +467,8 @@ function importLogBackfill(serverId, serverConfig, now) {
       importedSessions: 0,
       importedMs: 0,
       scannedFiles: 0,
+      parsedSessions: 0,
+      files: [],
       lastImportedAt: null,
       error: null
     };
@@ -444,11 +485,12 @@ function importLogBackfill(serverId, serverConfig, now) {
     let importedMs = 0;
 
     for (const session of sessions) {
-      const key = `${session.playerKey}:${session.startAt}:${session.endAt}`;
+      const key = sessionKey(session);
       if (stats.importedSessions[key]) continue;
       const duration = session.endAt - session.startAt;
       const maxDuration = serverConfig.logBackfillMaxSessionHours * 60 * 60 * 1000;
       if (duration <= 0 || duration > maxDuration) continue;
+      if (options.dryRun) continue;
 
       const record = stats.players[session.playerKey] || {
         name: session.playerName,
@@ -478,16 +520,20 @@ function importLogBackfill(serverId, serverConfig, now) {
       enabled: true,
       path: serverConfig.logPath,
       ok: true,
+      mode: options.dryRun ? "scan" : options.force ? "manual" : "auto",
       importedSessions,
       importedMs,
       scannedFiles: files.length,
       parsedSessions: sessions.length,
+      files: summarizeLogFiles(files, sessions, stats),
       durationMs: Date.now() - startedAt,
       lastImportedAt: importedSessions > 0 ? new Date(now).toISOString() : stats.logBackfill?.lastImportedAt || null,
       error: null
     };
     stats.logBackfill = result;
-    stats.lastUpdatedAt = new Date(now).toISOString();
+    if (!options.dryRun) {
+      stats.lastUpdatedAt = new Date(now).toISOString();
+    }
     return result;
   } catch (error) {
     const result = {
@@ -497,6 +543,8 @@ function importLogBackfill(serverId, serverConfig, now) {
       importedSessions: 0,
       importedMs: 0,
       scannedFiles: 0,
+      parsedSessions: 0,
+      files: [],
       durationMs: Date.now() - startedAt,
       lastImportedAt: stats.logBackfill?.lastImportedAt || null,
       error: error.message
@@ -556,7 +604,9 @@ function parseLogSessions(files) {
           playerKey,
           playerName: event.player,
           startAt: eventTime,
-          source: file.name
+          source: file.name,
+          sourceFile: file.name,
+          sourcePath: file.path
         });
         continue;
       }
@@ -567,12 +617,51 @@ function parseLogSessions(files) {
         ...open,
         playerName: event.player,
         endAt: eventTime,
-        source: `${open.source} -> ${file.name}`
+        source: `${open.source} -> ${file.name}`,
+        sourceFile: file.name,
+        sourcePath: file.path,
+        sourceFiles: [...new Set([open.sourceFile, file.name])]
       });
       openSessions.delete(playerKey);
     }
   }
   return completed;
+}
+
+function summarizeLogFiles(files, sessions, stats) {
+  const summaries = new Map(files.map((file) => [file.name, {
+    name: file.name,
+    path: file.path,
+    size: file.size,
+    mtime: new Date(file.mtimeMs).toISOString(),
+    parsedSessions: 0,
+    importedSessions: 0,
+    pendingSessions: 0,
+    synced: true
+  }]));
+
+  for (const session of sessions) {
+    const key = sessionKey(session);
+    const imported = Boolean(stats.importedSessions && stats.importedSessions[key]);
+    const sourceFiles = session.sourceFiles || [session.sourceFile].filter(Boolean);
+    for (const fileName of sourceFiles) {
+      const summary = summaries.get(fileName);
+      if (!summary) continue;
+      summary.parsedSessions += 1;
+      if (imported) summary.importedSessions += 1;
+      else summary.pendingSessions += 1;
+    }
+  }
+
+  for (const summary of summaries.values()) {
+    summary.synced = summary.pendingSessions === 0;
+  }
+
+  return [...summaries.values()].sort((a, b) => a.name.localeCompare(b.name));
+}
+
+function sessionKey(session) {
+  return `${session.playerKey}:${session.startAt}:${session.endAt}`;
 }
 
 function readLogFile(filePath) {
@@ -1390,6 +1479,10 @@ function resourceSelector(serverConfig) {
 
 function findServerState(id) {
   return state.servers.find((item) => item.id === id);
+}
+
+function findServerConfig(id) {
+  return config.servers.find((item) => item.id === id);
 }
 
 function loadEnvFile(filePath) {
