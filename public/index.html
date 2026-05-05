@@ -1,5 +1,5 @@
 <!doctype html>
-<html lang="zh-CN">
+<html lang="zh-CN" data-theme="auto">
   <head>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
@@ -10,105 +10,108 @@
     <main class="shell">
       <header class="topbar">
         <div>
-          <p class="eyebrow">Minecraft Monitor</p>
-          <h1 id="appName">服务器集群状态</h1>
+          <p class="eyebrow" data-i18n="eyebrow">Minecraft Monitor</p>
+          <h1 id="appName" data-i18n="title">服务器集群状态</h1>
           <div class="target" id="targetAddress">--</div>
         </div>
         <div class="topbar-actions">
           <div class="status-pill" id="statusPill">
             <span class="status-dot"></span>
-            <span id="statusText">启动中</span>
+            <span id="statusText" data-i18n="starting">启动中</span>
           </div>
-          <button class="icon-button" id="refreshButton" title="刷新">
+          <button class="icon-button" id="langButton" type="button" title="Language" aria-label="Language">EN</button>
+          <button class="icon-button" id="themeButton" type="button" title="Theme" aria-label="Theme">◐</button>
+          <button class="icon-button" id="refreshButton" type="button" title="Refresh">
             <span aria-hidden="true">↻</span>
           </button>
         </div>
       </header>
 
-      <section class="metric-grid" aria-label="核心指标">
+      <section class="metric-grid" aria-label="metrics">
         <article class="metric">
-          <span class="metric-label">服务器在线</span>
+          <span class="metric-label" data-i18n="serverOnlineLabel">服务器在线</span>
           <strong id="onlineMetric">--</strong>
-          <small id="motdMetric">等待采样</small>
+          <small id="motdMetric" data-i18n="awaitingSample">等待采样</small>
         </article>
         <article class="metric">
-          <span class="metric-label">选中服务器延迟</span>
+          <span class="metric-label" data-i18n="latencyLabel">选中服务器延迟</span>
           <strong id="latencyMetric">--</strong>
           <small id="connectionMetric">--</small>
         </article>
         <article class="metric">
-          <span class="metric-label">总在线玩家</span>
+          <span class="metric-label" data-i18n="totalPlayersLabel">总在线玩家</span>
           <strong id="playersMetric">--</strong>
           <small id="trackingMetric">--</small>
         </article>
         <article class="metric">
-          <span class="metric-label">主机资源</span>
+          <span class="metric-label" data-i18n="hostResLabel">主机资源</span>
           <strong id="resourceMetric">--</strong>
           <small id="memoryMetric">--</small>
         </article>
       </section>
 
-      <section class="server-grid" id="serverGrid" aria-label="服务器列表"></section>
+      <section class="server-grid" id="serverGrid" aria-label="servers"></section>
 
       <section class="dashboard-grid">
         <article class="panel panel-wide">
           <div class="panel-header">
             <div>
-              <h2 id="selectedTitle">连接趋势</h2>
+              <h2 id="selectedTitle" data-i18n="trendTitle">连接趋势</h2>
               <p id="versionLine">--</p>
             </div>
             <div class="updated" id="updatedAt">--</div>
           </div>
-          <canvas id="historyChart" height="190"></canvas>
+          <canvas id="historyChart" height="210"></canvas>
         </article>
 
         <article class="panel">
           <div class="panel-header">
             <div>
-              <h2>服务器进程资源</h2>
+              <h2 data-i18n="processResources">服务器进程资源</h2>
               <p id="hostLine">--</p>
             </div>
           </div>
           <div class="resource-list">
             <div class="bar-row">
-              <div class="bar-label"><span>整机 CPU</span><strong id="cpuValue">--</strong></div>
+              <div class="bar-label"><span data-i18n="cpuLabel">整机 CPU</span><strong id="cpuValue">--</strong></div>
               <div class="bar"><span id="cpuBar"></span></div>
             </div>
             <div class="bar-row">
-              <div class="bar-label"><span>整机内存</span><strong id="ramValue">--</strong></div>
+              <div class="bar-label"><span data-i18n="memoryLabel">整机内存</span><strong id="ramValue">--</strong></div>
               <div class="bar"><span id="ramBar"></span></div>
             </div>
-            <div class="bar-row">
-              <div class="bar-label"><span>磁盘</span><strong id="diskValue">--</strong></div>
+            <div class="bar-row" id="diskGroup">
+              <div class="bar-label"><span data-i18n="diskLabel">磁盘</span><strong id="diskValue">--</strong></div>
               <div class="bar"><span id="diskBar"></span></div>
             </div>
           </div>
+          <div class="tps-line" id="tpsLine"></div>
           <div class="process-list" id="processList"></div>
         </article>
 
         <article class="panel panel-wide">
           <div class="panel-header">
             <div>
-              <h2>在线玩家</h2>
+              <h2 data-i18n="onlinePlayers">在线玩家</h2>
               <p id="onlinePlayersLine">--</p>
             </div>
-            <button class="sync-button" id="syncLogsButton" type="button">同步日志</button>
+            <button class="sync-button" id="syncLogsButton" type="button" data-i18n="syncLogs">同步日志</button>
           </div>
           <div class="backfill-box" id="backfillBox">
-            <div class="empty">未启用日志回填</div>
+            <div class="empty" data-i18n="backfillDisabled">未启用日志回填</div>
           </div>
           <div class="table-wrap">
             <table>
               <thead>
                 <tr>
-                  <th>玩家</th>
-                  <th>本次在线</th>
-                  <th>累计在线</th>
-                  <th>会话</th>
+                  <th data-i18n="player">玩家</th>
+                  <th data-i18n="currentSession">本次在线</th>
+                  <th data-i18n="totalTime">累计在线</th>
+                  <th data-i18n="sessions">会话</th>
                 </tr>
               </thead>
               <tbody id="onlinePlayersTable">
-                <tr><td colspan="4">等待数据</td></tr>
+                <tr><td colspan="4" data-i18n="awaitingData">等待数据</td></tr>
               </tbody>
             </table>
           </div>
@@ -117,8 +120,12 @@
         <article class="panel">
           <div class="panel-header">
             <div>
-              <h2>在线时长榜</h2>
+              <h2 data-i18n="leaderboard">在线时长榜</h2>
               <p id="leaderboardLine">--</p>
+            </div>
+            <div class="seg" role="tablist">
+              <button class="seg-btn selected" data-board="server" data-i18n="boardThisServer">本服</button>
+              <button class="seg-btn" data-board="combined" data-i18n="boardAll">汇总</button>
             </div>
           </div>
           <div class="leaderboard" id="leaderboard"></div>
@@ -126,6 +133,7 @@
       </section>
     </main>
 
+    <script src="/i18n.js"></script>
     <script src="/app.js"></script>
   </body>
 </html>

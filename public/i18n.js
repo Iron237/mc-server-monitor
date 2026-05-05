@@ -1,0 +1,183 @@
+"use strict";
+
+window.I18N = {
+  zh: {
+    eyebrow: "Minecraft Monitor",
+    title: "服务器集群状态",
+    starting: "启动中",
+    serverOnlineLabel: "服务器在线",
+    latencyLabel: "选中服务器延迟",
+    totalPlayersLabel: "总在线玩家",
+    hostResLabel: "主机资源",
+    awaitingSample: "等待采样",
+    trendTitle: "连接趋势",
+    processResources: "服务器进程资源",
+    cpuLabel: "整机 CPU",
+    memoryLabel: "整机内存",
+    diskLabel: "磁盘",
+    onlinePlayers: "在线玩家",
+    syncLogs: "同步日志",
+    backfillDisabled: "未启用日志回填",
+    player: "玩家",
+    currentSession: "本次在线",
+    totalTime: "累计在线",
+    sessions: "会话",
+    awaitingData: "等待数据",
+    leaderboard: "在线时长榜",
+    boardThisServer: "本服",
+    boardAll: "汇总",
+    online: "在线",
+    offline: "离线",
+    onlineSlash: "在线",
+    noServers: "没有服务器",
+    noMotd: "无 MOTD",
+    lastSuccess: "最近成功",
+    failures: "失败 {n} 次",
+    full: "完整玩家列表",
+    partial: "样本统计",
+    countOnly: "仅人数",
+    none: "未统计",
+    waitingTrend: "等待趋势数据",
+    chartPlayers: "玩家",
+    chartLatency: "延迟",
+    syncing: "同步中",
+    syncFailed: "日志同步失败：{msg}",
+    pageFailed: "页面连接失败",
+    matchedProcs: "匹配进程 {n} 个",
+    noProcs: "未找到匹配进程：{sel}",
+    waitingDuration: "等待在线时长数据",
+    noLeaderboard: "暂无累计数据",
+    leaderboardCount: "记录 {n} 名玩家",
+    onlineCountTrack: "{n} 名已识别 · {tracking}",
+    backfillSuffix: " · 日志回填 {body}",
+    backfillRound: "本轮 {n} 段",
+    backfillFailed: "失败",
+    serverHasPlayersNoNames: "服务器有玩家在线，但当前协议没有返回玩家名",
+    noOnline: "暂无在线玩家",
+    files: "{n} 个文件 · {parsed} 段会话 · 本轮导入 {imported} 段",
+    logPathLabel: "日志路径：{p}",
+    logsAllSynced: "所有可导入会话已同步",
+    logsPending: "{n} 个日志仍有未同步会话",
+    lastImported: "最近导入 {t}",
+    notImported: "尚未导入",
+    cantReadLogs: "无法读取日志",
+    noLogsScanned: "没有扫描到日志文件",
+    waitingUpdate: "等待更新",
+    updateAt: "更新 {t}",
+    sessionsLabel: "会话 {parsed} · 已同步 {imported} · 未同步 {pending} · {t}",
+    synced: "已同步",
+    pending: "未同步",
+    failedShort: "失败",
+    noVersion: "暂无版本信息",
+    resourceMode: "资源识别：{sel}",
+    minutes: "{n} 分钟",
+    hoursMinutes: "{h} 小时 {m} 分钟",
+    daysHours: "{d} 天 {h} 小时",
+    zeroMinutes: "0 分钟",
+    tps: "TPS"
+  },
+  en: {
+    eyebrow: "Minecraft Monitor",
+    title: "Server Cluster Status",
+    starting: "Starting",
+    serverOnlineLabel: "Servers Online",
+    latencyLabel: "Selected Latency",
+    totalPlayersLabel: "Players Online",
+    hostResLabel: "Host Resources",
+    awaitingSample: "Awaiting sample",
+    trendTitle: "Connection Trend",
+    processResources: "Server Process Resources",
+    cpuLabel: "Host CPU",
+    memoryLabel: "Host Memory",
+    diskLabel: "Disk",
+    onlinePlayers: "Online Players",
+    syncLogs: "Sync Logs",
+    backfillDisabled: "Log backfill disabled",
+    player: "Player",
+    currentSession: "Session",
+    totalTime: "Total",
+    sessions: "Sessions",
+    awaitingData: "Awaiting data",
+    leaderboard: "Time Leaderboard",
+    boardThisServer: "This",
+    boardAll: "Combined",
+    online: "Online",
+    offline: "Offline",
+    onlineSlash: "online",
+    noServers: "No servers",
+    noMotd: "No MOTD",
+    lastSuccess: "Last success",
+    failures: "{n} failures",
+    full: "Full player list",
+    partial: "Sample only",
+    countOnly: "Count only",
+    none: "Not tracked",
+    waitingTrend: "Awaiting trend data",
+    chartPlayers: "Players",
+    chartLatency: "Latency",
+    syncing: "Syncing",
+    syncFailed: "Log sync failed: {msg}",
+    pageFailed: "Page connection failed",
+    matchedProcs: "{n} matched processes",
+    noProcs: "No matching process: {sel}",
+    waitingDuration: "Awaiting playtime data",
+    noLeaderboard: "No cumulative data",
+    leaderboardCount: "{n} players tracked",
+    onlineCountTrack: "{n} identified · {tracking}",
+    backfillSuffix: " · Log backfill {body}",
+    backfillRound: "round {n} sessions",
+    backfillFailed: "failed",
+    serverHasPlayersNoNames: "Server reports players but did not return names",
+    noOnline: "No online players",
+    files: "{n} files · {parsed} sessions · imported this round {imported}",
+    logPathLabel: "Log path: {p}",
+    logsAllSynced: "All available sessions synced",
+    logsPending: "{n} log files have pending sessions",
+    lastImported: "Last imported {t}",
+    notImported: "Not yet imported",
+    cantReadLogs: "Cannot read logs",
+    noLogsScanned: "No log files scanned",
+    waitingUpdate: "Awaiting update",
+    updateAt: "Updated {t}",
+    sessionsLabel: "{parsed} parsed · {imported} synced · {pending} pending · {t}",
+    synced: "synced",
+    pending: "pending",
+    failedShort: "failed",
+    noVersion: "No version info",
+    resourceMode: "Resource: {sel}",
+    minutes: "{n} min",
+    hoursMinutes: "{h}h {m}m",
+    daysHours: "{d}d {h}h",
+    zeroMinutes: "0 min",
+    tps: "TPS"
+  }
+};
+
+window.t = function t(key, params) {
+  const lang = (localStorage.getItem("mc-lang") || "zh");
+  const dict = window.I18N[lang] || window.I18N.zh;
+  let value = dict[key] || window.I18N.zh[key] || key;
+  if (params) {
+    for (const [pk, pv] of Object.entries(params)) {
+      value = value.replace(new RegExp(`\\{${pk}\\}`, "g"), pv);
+    }
+  }
+  return value;
+};
+
+window.applyI18n = function applyI18n() {
+  const lang = (localStorage.getItem("mc-lang") || "zh");
+  document.documentElement.lang = lang === "zh" ? "zh-CN" : "en";
+  document.querySelectorAll("[data-i18n]").forEach((el) => {
+    const key = el.getAttribute("data-i18n");
+    el.textContent = window.t(key);
+  });
+  const btn = document.querySelector("#langButton");
+  if (btn) btn.textContent = lang === "zh" ? "EN" : "中";
+};
+
+window.toggleLang = function toggleLang() {
+  const next = (localStorage.getItem("mc-lang") || "zh") === "zh" ? "en" : "zh";
+  localStorage.setItem("mc-lang", next);
+  window.applyI18n();
+};
