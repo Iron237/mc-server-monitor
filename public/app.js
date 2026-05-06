@@ -309,7 +309,7 @@ function renderSelected(selected, payload) {
   elements.updatedAt.textContent = selected.lastUpdatedAt ? window.t("updateAt", { t: formatDateTime(selected.lastUpdatedAt) }) : window.t("waitingUpdate");
 
   renderResources(payload, selected);
-  renderTps(selected.tps, selected.mspt);
+  renderTps(selected.tps, selected.mspt, selected.msptStats);
   renderPlayers(players, selected.tracking, selected.server.playersOnline || 0);
   renderBackfill(selected);
   renderLeaderboard(selected, players);
@@ -364,9 +364,10 @@ function renderResources(payload, selected) {
   elements.processList.replaceChildren(...items);
 }
 
-function renderTps(tps, mspt) {
+function renderTps(tps, mspt, msptStats) {
   const tpsOk = tps && tps.ok;
   const msptOk = mspt && mspt.ok;
+  const statsOk = msptStats && msptStats.ok && msptStats.samples >= 2;
   if (!tpsOk && !msptOk) {
     elements.tpsLine.textContent = "";
     elements.tpsLine.classList.remove("show", "warn", "hot");
@@ -376,13 +377,22 @@ function renderTps(tps, mspt) {
   const fmt = (n) => Number.isFinite(n) ? n.toFixed(1) : "--";
   const parts = [];
   if (tpsOk) {
-    parts.push(`${window.t("tps")} 1m ${fmt(tps.tps1m)} · 5m ${fmt(tps.tps5m)} · 15m ${fmt(tps.tps15m)}`);
+    if (Number.isFinite(tps.tps5m) || Number.isFinite(tps.tps15m)) {
+      parts.push(`${window.t("tps")} 1m ${fmt(tps.tps1m)} · 5m ${fmt(tps.tps5m)} · 15m ${fmt(tps.tps15m)}`);
+    } else {
+      parts.push(`${window.t("tps")} ${fmt(tps.tps1m)}`);
+    }
   }
   if (msptOk) {
     parts.push(`MSPT ${fmt(mspt.avg)}${Number.isFinite(mspt.peak) ? ` (peak ${fmt(mspt.peak)})` : ""}`);
   }
+  // Append our monitor-side rolling p95 / peak when spark didn't give us
+  // its own peak figure. Window text describes the sampled minutes.
+  if (statsOk && (!msptOk || !Number.isFinite(mspt.peak))) {
+    const minutes = Math.round((msptStats.windowMs || 0) / 60000);
+    parts.push(`p95 ${fmt(msptStats.p95)} · peak ${fmt(msptStats.peak)} (${minutes}min)`);
+  }
   elements.tpsLine.textContent = parts.join(" · ");
-  // Red below 10, yellow below 18; relative to TPS only.
   elements.tpsLine.classList.toggle("hot", tpsOk && Number.isFinite(tps.tps1m) && tps.tps1m < 10);
   elements.tpsLine.classList.toggle("warn", tpsOk && Number.isFinite(tps.tps1m) && tps.tps1m >= 10 && tps.tps1m < 18);
 }

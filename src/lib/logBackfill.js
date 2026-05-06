@@ -103,6 +103,24 @@ const DEATH_PHRASES = [
   "died"
 ];
 
+// Spark broadcasts ping responses through chat / console asynchronously. The
+// only way to capture them from a Node process is to scan the server log
+// after a `/spark ping` RCON probe lands. Captured fixture (NeoForge 1.21.1
+// + spark):
+//
+//   [Server thread/INFO] [net.minecraft.server.MinecraftServer/]: [⚡] Player IronGod777 has 0 ms ping.
+//
+// `spark ping` (no --player) emits one such line per online player; the
+// `--player <name>` form emits a single line. Format is identical either
+// way, so one regex covers both.
+function parseSparkPingLine(line) {
+  // Anchor on Spark's lightning prefix to keep this from matching innocent
+  // chat that happens to contain "Player X has Y ms ping".
+  const m = line.match(/\[⚡\]\s*Player\s+([A-Za-z0-9_]{3,16})\s+has\s+(\d+(?:\.\d+)?)\s+ms\s+ping\b/);
+  if (!m) return null;
+  return { action: "ping", player: m[1], ms: Number(m[2]) };
+}
+
 function parsePlayerDeathEvent(line) {
   // Skip chat (always shown with angle-bracketed name) and the join / leave /
   // connect events the session parser already owns.
@@ -230,7 +248,8 @@ function parseFileSessions(file) {
   for (const line of text.split(/\r?\n/)) {
     const sessionEvent = parsePlayerLogEvent(line);
     const deathEvent = sessionEvent ? null : parsePlayerDeathEvent(line);
-    const event = sessionEvent || deathEvent;
+    const pingEvent = (sessionEvent || deathEvent) ? null : parseSparkPingLine(line);
+    const event = sessionEvent || deathEvent || pingEvent;
     if (!event) continue;
     const timestamp = parseLogTimestamp(line, fallbackDate);
     if (!timestamp) continue;
@@ -249,6 +268,7 @@ function parseFileSessions(file) {
       sourcePath: file.path
     };
     if (event.action === "death") record.cause = detach(event.cause);
+    if (event.action === "ping") record.ms = event.ms;
     events.push(record);
   }
   // Hard ceiling as a safety net for setups with thousands of files. With
@@ -502,10 +522,36 @@ function clearSessionCache() {
   sessionCacheKeyByPath.clear();
 }
 
+// Walk the recent log files (newest first) collecting the most recent ping
+// event per player. We stop early once every requested player has a sample
+// or `maxAgeMs` is exceeded relative to the file's events. Returns an array
+// `[{ name, ms, at }]` sorted by ascending ping.
+function extractRecentPings(files, maxAgeMs = 5 * 60 * 1000) {
+  const cutoff = Date.now() - maxAgeMs;
+  const latest = new Map();
+  // Newest files first; we want the latest event per player.
+  const ordered = [...files].sort((a, b) => b.mtimeMs - a.mtimeMs);
+  for (const file of ordered) {
+    let events;
+    try { events = parseFileSessions(file); } catch { continue; }
+    // Iterate events in reverse so the freshest match per player wins.
+    for (let i = events.length - 1; i >= 0; i -= 1) {
+      const ev = events[i];
+      if (ev.action !== "ping") continue;
+      if (ev.eventTime < cutoff) continue;
+      const key = ev.player.toLowerCase();
+      if (latest.has(key)) continue;
+      latest.set(key, { name: ev.player, ms: ev.ms, at: new Date(ev.eventTime).toISOString() });
+    }
+  }
+  return [...latest.values()].sort((a, b) => a.ms - b.ms);
+}
+
 module.exports = {
   listLogFiles,
   parsePlayerLogEvent,
   parsePlayerDeathEvent,
+  parseSparkPingLine,
   parseLogTimestamp,
   parseLogSessions,
   parseLogDeaths,
@@ -517,6 +563,7 @@ module.exports = {
   summarizeLogFiles,
   importLogBackfill,
   emptyBackfill,
+  extractRecentPings,
   clearSessionCache,
   DEATH_PHRASES
 };
