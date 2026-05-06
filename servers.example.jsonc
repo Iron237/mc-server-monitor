@@ -1,0 +1,67 @@
+// Minecraft Server Monitor - 服务器列表配置
+//
+// 用法：
+//   1. 复制本文件为 servers.jsonc（或 servers.json，但 .json 不支持注释）
+//   2. 按下面的注释改成你自己的服务器
+//   3. 启动 / 重启监控服务
+//
+// 也支持自定义路径：在 .env 里设 SERVERS_FILE=path/to/servers.jsonc
+// 优先级：SERVERS_FILE > servers.jsonc > servers.json > .env 里的 SERVERS=
+//
+// 路径写 Windows 反斜杠时记得用 "C:\\Users\\..." 或者直接写正斜杠 "C:/Users/...".
+// 这里允许写注释、尾逗号、单引号字符串。
+[
+  {
+    // 内部 ID，slug 化后用作 API 路径，多服务器之间不能重复
+    "id": "server1",
+    "name": "生存服",
+
+    // Minecraft Java Edition Status Ping 目标
+    "host": "127.0.0.1",
+    "port": 25565,
+
+    // Query 协议（UDP）。需要在 server.properties 里设
+    //   enable-query=true
+    //   query.port=25565
+    // 才能拿到完整玩家列表 + 精确在线时长
+    "queryEnabled": true,
+    "queryHost": "127.0.0.1",
+    "queryPort": 25565,
+
+    // 进程资源识别（CPU / 内存）。优先级：pid > processPort > processName
+    // 一台机跑多个服时，用 processPort 最稳
+    "processPort": 25565,
+    // "pid": 12345,
+    // "processName": "java",
+
+    // 日志回填：把崩溃前 / 监控未运行期间的玩家在线时长，从 server 日志补回来
+    "logBackfillEnabled": true,
+    "logPath": "C:/Users/123/Desktop/航空学server/logs",
+
+    // 监控这个目录所在磁盘的剩余空间
+    "worldPath": "C:/Users/123/Desktop/航空学server/world",
+
+    // 可选：RCON 读 TPS（Forge / spark）
+    // "rconEnabled": true,
+    // "rconHost": "127.0.0.1",
+    // "rconPort": 25575,
+    // "rconPassword": "your-rcon-password"
+  },
+
+  {
+    "id": "server2",
+    "name": "服务器2",
+    "host": "127.0.0.1",
+    "port": 20000,
+
+    "queryEnabled": true,
+    "queryHost": "127.0.0.1",
+    "queryPort": 20000,
+
+    "processPort": 20000,
+
+    "logBackfillEnabled": true,
+    "logPath": "C:/Users/123/Desktop/航空建筑创造/logs",
+    "worldPath": "C:/Users/123/Desktop/航空建筑创造/world",
+  },
+]

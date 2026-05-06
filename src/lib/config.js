@@ -1,8 +1,9 @@
 "use strict";
 
+const fs = require("fs");
 const path = require("path");
 
-const { envString, envInt, envBool, toInt, toBool } = require("./env");
+const { envString, envInt, envBool, toInt, toBool, loadJsoncFile } = require("./env");
 const { slug } = require("./util");
 
 function resourceSelector(serverConfig) {
@@ -47,7 +48,45 @@ function normalizeServerConfig(item, index) {
   };
 }
 
-function loadServerConfigs() {
+function parseServersFile(filePath) {
+  let data;
+  try {
+    data = loadJsoncFile(filePath);
+  } catch (error) {
+    throw new Error(`Failed to parse ${filePath}: ${error.message}`);
+  }
+  const servers = Array.isArray(data)
+    ? data
+    : data && Array.isArray(data.servers)
+      ? data.servers
+      : null;
+  if (!servers || servers.length === 0) {
+    throw new Error(`${filePath} must contain a non-empty array (or {"servers": [...]}).`);
+  }
+  return servers.map((item, index) => normalizeServerConfig(item, index));
+}
+
+function resolveServersFile(rootDir) {
+  const base = rootDir || process.cwd();
+  const explicit = envString("SERVERS_FILE", "");
+  if (explicit) {
+    const full = path.resolve(base, explicit);
+    if (!fs.existsSync(full)) {
+      throw new Error(`SERVERS_FILE points to ${full} but the file does not exist.`);
+    }
+    return full;
+  }
+  for (const name of ["servers.jsonc", "servers.json"]) {
+    const full = path.resolve(base, name);
+    if (fs.existsSync(full)) return full;
+  }
+  return null;
+}
+
+function loadServerConfigs(rootDir) {
+  const fromFile = resolveServersFile(rootDir);
+  if (fromFile) return parseServersFile(fromFile);
+
   const raw = envString("SERVERS", "");
   if (raw) {
     try {
@@ -120,13 +159,16 @@ function loadAppConfig(rootDir) {
     sseEnabled: envBool("SSE_ENABLED", true),
     staleSessionMultiplier: Math.max(2, envInt("STALE_SESSION_POLL_MULTIPLIER", 4)),
     rconTimeoutMs: envInt("RCON_TIMEOUT_MS", 3000),
-    servers: loadServerConfigs()
+    serversSource: resolveServersFile(rootDir) || (envString("SERVERS", "") ? "SERVERS env" : "single-server env"),
+    servers: loadServerConfigs(rootDir)
   };
 }
 
 module.exports = {
   loadAppConfig,
   loadServerConfigs,
+  resolveServersFile,
+  parseServersFile,
   normalizeServerConfig,
   publicServerConfig,
   resourceSelector

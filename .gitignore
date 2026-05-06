@@ -1,5 +1,8 @@
 node_modules/
 .env
+servers.json
+servers.jsonc
+!servers.example.jsonc
 data/*.json
 *.log
 .DS_Store

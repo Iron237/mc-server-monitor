@@ -182,6 +182,7 @@ function startServer(callback) {
   started = true;
   server.listen(config.port, config.host, () => {
     console.log(`${config.appName} listening on http://${config.host}:${config.port}${config.authToken ? " (auth required)" : ""}`);
+    console.log(`Loaded ${config.servers.length} server(s) from ${config.serversSource}`);
     pollNow();
     if (callback) callback();
   });
