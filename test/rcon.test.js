@@ -79,6 +79,34 @@ test("parseDimensionStats reads forge-style per-dimension TPS lines", () => {
   assert.equal(dims[2].entities, null);
 });
 
+test("parseDimensionStats reads NeoForge 1.21 bare-namespace lines", () => {
+  // NeoForge dropped the `Dim N (...)` wrapper — namespace is the line head.
+  const text = [
+    "Overall: Mean tick time: 11.2 ms. Mean TPS: 18.92.",
+    "minecraft:overworld: Mean tick time: 5.21 ms. Mean TPS: 19.92.",
+    "minecraft:the_nether: Mean tick time: 1.10 ms. Mean TPS: 20.00.",
+    "minecraft:the_end: Mean tick time: 0.50 ms. Mean TPS: 20.00."
+  ].join("\n");
+  const dims = parseDimensionStats(text);
+  assert.equal(dims.length, 3);
+  assert.deepEqual(dims.map((d) => d.name), [
+    "minecraft:overworld", "minecraft:the_nether", "minecraft:the_end"
+  ]);
+  assert.equal(dims[0].tps, 19.92);
+  assert.equal(dims[0].mspt, 5.21);
+});
+
+test("parseDimensionStats keeps modded-namespace dimensions (twilightforest etc.)", () => {
+  const text = [
+    "Overall: Mean tick time: 11.2 ms. Mean TPS: 18.9",
+    "twilightforest:twilight_forest: Mean tick time: 3.4 ms. Mean TPS: 20.0",
+    "create:whatever-modded.dim: Mean tick time: 0.7 ms. Mean TPS: 20.0"
+  ].join("\n");
+  const dims = parseDimensionStats(text);
+  assert.equal(dims.length, 2);
+  assert.equal(dims[0].name, "twilightforest:twilight_forest");
+});
+
 test("parseDimensionStats returns empty array when input lacks Dim lines", () => {
   assert.deepEqual(parseDimensionStats("Mean tick time: 10 ms. Mean TPS: 20.0"), []);
   assert.deepEqual(parseDimensionStats(""), []);

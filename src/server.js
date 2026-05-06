@@ -9,7 +9,7 @@ const { loadAppConfig, publicServerConfig, resourceSelector } = require("./lib/c
 const { sumNumbers } = require("./lib/util");
 const { pingMinecraftServer } = require("./lib/mcProtocol");
 const { queryMinecraftServer } = require("./lib/mcQuery");
-const { readServerHealth } = require("./lib/rcon");
+const { readServerHealth, rconCommand } = require("./lib/rcon");
 const { createAlertEngine } = require("./lib/alerts");
 const { createWebhookDispatcher } = require("./lib/webhooks");
 const { createWorldSizeSampler } = require("./lib/worldSize");
@@ -148,6 +148,29 @@ const server = http.createServer(async (request, response) => {
     }
     if (parsed.pathname === "/api/leaderboard") {
       sendJson(response, 200, buildCombinedLeaderboard());
+      return;
+    }
+    // Debug endpoint to introspect raw RCON output for a server. Lets the
+    // operator see exactly what `neoforge tps` / `spark tps` returned so a
+    // wrong-format dimension parse can be fixed without server-side guessing.
+    //
+    //   curl -H "Authorization: Bearer $TOKEN" \
+    //        "http://localhost:3000/api/debug/rcon/server1?cmd=neoforge%20tps"
+    if (parsed.pathname.startsWith("/api/debug/rcon/")) {
+      const serverId = decodeURIComponent(parsed.pathname.slice("/api/debug/rcon/".length));
+      const serverConfig = findServerConfig(serverId);
+      if (!serverConfig) { sendJson(response, 404, { error: "Unknown server id" }); return; }
+      if (!serverConfig.rconEnabled || !serverConfig.rconPort) {
+        sendJson(response, 400, { error: "RCON not enabled for this server" }); return;
+      }
+      const cmd = parsed.searchParams.get("cmd") || "neoforge tps";
+      const result = await rconCommand({
+        host: serverConfig.rconHost || serverConfig.host,
+        port: serverConfig.rconPort,
+        password: serverConfig.rconPassword,
+        timeoutMs: config.rconTimeoutMs
+      }, cmd);
+      sendJson(response, 200, { command: cmd, ...result });
       return;
     }
     if (parsed.pathname === "/api/events") {
