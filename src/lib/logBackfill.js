@@ -196,10 +196,32 @@ function fileCacheKey(file) {
   return `${file.path}|${file.size}|${file.mtimeMs}`;
 }
 
+// Per-file path → most recent cacheKey, so we can evict the previous entry
+// when a file (typically `latest.log`) changes size / mtime. Without this,
+// every poll inserts a fresh entry for `latest.log`, the historical
+// `.log.gz` archives eventually fall off the LRU end, and the next poll
+// re-reads + gunzips dozens of MB. Old behavior leaked ~5 MB/s of heap.
+const sessionCacheKeyByPath = new Map();
+
+// Force a fresh allocation so V8 doesn't keep a multi-MB parent string
+// alive through a tiny substring (`String#match` / `slice` results in V8
+// can be sliced strings that retain their parent until GC visits them).
+function detach(s) {
+  return s == null ? s : (" " + s).slice(1);
+}
+
 function parseFileSessions(file) {
   const cacheKey = fileCacheKey(file);
   const cached = sessionCache.get(cacheKey);
   if (cached) return cached;
+
+  // Drop any prior cache entry for the same path before we add the new one.
+  // This bounds the cache at "one entry per source file" — no LRU churn.
+  const previousKey = sessionCacheKeyByPath.get(file.path);
+  if (previousKey && previousKey !== cacheKey) {
+    sessionCache.delete(previousKey);
+  }
+
   const fallbackDate = dateFromLogFileName(file.name) || new Date(file.mtimeMs);
   const text = readLogFile(file.path);
   const events = [];
@@ -217,15 +239,26 @@ function parseFileSessions(file) {
     }
     const eventTime = timestamp.getTime() + dayOffsetMs;
     previousTimestamp = eventTime;
-    const record = { player: event.player, action: event.action, eventTime, file };
-    if (event.action === "death") record.cause = event.cause;
+    const record = {
+      player: detach(event.player),
+      action: event.action,
+      eventTime,
+      // Only keep light file metadata, not a reference to the file object
+      // (which Node may keep alive longer than necessary inside the closure).
+      sourceFile: file.name,
+      sourcePath: file.path
+    };
+    if (event.action === "death") record.cause = detach(event.cause);
     events.push(record);
   }
-  if (sessionCache.size > 256) {
+  // Hard ceiling as a safety net for setups with thousands of files. With
+  // the per-path eviction above we expect ≤ logBackfillMaxFiles entries.
+  if (sessionCache.size > 512) {
     const oldestKey = sessionCache.keys().next().value;
     sessionCache.delete(oldestKey);
   }
   sessionCache.set(cacheKey, events);
+  sessionCacheKeyByPath.set(file.path, cacheKey);
   return events;
 }
 
@@ -466,6 +499,7 @@ function importLogBackfill(serverId, serverConfig, stats, now, options = {}) {
 
 function clearSessionCache() {
   sessionCache.clear();
+  sessionCacheKeyByPath.clear();
 }
 
 module.exports = {
