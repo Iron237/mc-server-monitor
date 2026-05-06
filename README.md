@@ -23,7 +23,8 @@
 
 ```powershell
 Copy-Item config.example.env .env
-notepad .env
+Copy-Item servers.example.jsonc servers.jsonc
+notepad servers.jsonc   # 多行可注释，改完保存
 node src/server.js
 ```
 
@@ -35,10 +36,46 @@ npm test
 
 ## 多服务器配置
 
-主要配置写在 `.env` 的 `SERVERS` 里：
+**推荐**：把详细配置写到 `servers.jsonc`（多行、支持 `// 注释` 和尾逗号）：
 
-```env
-SERVERS=[{"id":"server1","name":"生存服","host":"127.0.0.1","port":25565,"queryEnabled":true,"queryPort":25565,"processPort":25565,"worldPath":"G:/world","logBackfillEnabled":true,"logPath":"G:/临时处理"},{"id":"server2","name":"服务器2","host":"127.0.0.1","port":2000,"queryEnabled":true,"queryPort":2000,"processPort":2000}]
+```jsonc
+// servers.jsonc
+[
+  {
+    "id": "server1",
+    "name": "生存服",
+    "host": "127.0.0.1",
+    "port": 25565,
+    "queryEnabled": true,
+    "queryPort": 25565,
+    "processPort": 25565,
+    "logBackfillEnabled": true,
+    "logPath": "C:/Users/123/Desktop/航空学server/logs",
+    "worldPath": "C:/Users/123/Desktop/航空学server/world"
+  },
+  {
+    "id": "server2",
+    "name": "服务器2",
+    "host": "127.0.0.1",
+    "port": 20000,
+    "queryEnabled": true,
+    "queryPort": 20000,
+    "processPort": 20000,
+  },
+]
+```
+
+加载优先级（高 → 低）：
+
+1. `.env` 里 `SERVERS_FILE=path/to/file.jsonc`（显式指定）
+2. 项目根的 `servers.jsonc` 或 `servers.json`（自动发现）
+3. `.env` 里的 `SERVERS=[...]` 单行 JSON（向后兼容）
+4. `MC_HOST` / `MC_PORT` 等单服务器变量（向后兼容）
+
+启动日志会打印当前来源，比如：
+
+```
+Loaded 2 server(s) from G:\mc-server-monitor\servers.jsonc
 ```
 
 每个服务器对象支持：
