@@ -79,6 +79,35 @@ test("parseDimensionStats reads forge-style per-dimension TPS lines", () => {
   assert.equal(dims[2].entities, null);
 });
 
+test("parseDimensionStats reads NeoForge 1.21.1 display-name format (real captured output)", () => {
+  // Captured verbatim from `/neoforge tps` over RCON on NeoForge 1.21.1:
+  const text = [
+    "Overworld: 20.000 TPS (4.819 ms/tick)",
+    "The End: 20.000 TPS (0.240 ms/tick)",
+    "The Nether: 20.000 TPS (0.103 ms/tick)",
+    "Spatial Storage: 20.000 TPS (0.068 ms/tick)",
+    "Overall: 20.000 TPS (5.265 ms/tick)"
+  ].join("\n");
+  const dims = parseDimensionStats(text);
+  assert.equal(dims.length, 4, "Overall is excluded");
+  assert.deepEqual(dims.map((d) => d.name), [
+    "Overworld", "The End", "The Nether", "Spatial Storage"
+  ]);
+  assert.equal(dims[0].tps, 20);
+  assert.equal(dims[0].mspt, 4.819);
+  assert.equal(dims[3].mspt, 0.068);
+});
+
+test("parseTpsLine prefers the Overall: TPS (mspt ms/tick) summary on NeoForge", () => {
+  const text = [
+    "Overworld: 20.000 TPS (4.819 ms/tick)",
+    "Overall: 19.823 TPS (5.265 ms/tick)"
+  ].join("\n");
+  const out = parseTpsLine(text);
+  assert.equal(out.tps1m, 19.823);
+  assert.equal(out.mspt, 5.265);
+});
+
 test("parseDimensionStats reads NeoForge 1.21 bare-namespace lines", () => {
   // NeoForge dropped the `Dim N (...)` wrapper — namespace is the line head.
   const text = [
