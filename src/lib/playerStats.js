@@ -41,7 +41,64 @@ function ensureServerStats(playerStats, serverId) {
   if (!stats.players) stats.players = {};
   if (!stats.active) stats.active = {};
   if (!stats.importedSessions) stats.importedSessions = {};
+  mergeDuplicatePlayerKeys(stats);
   return stats;
+}
+
+// Player key strategy: lowercased display name is the canonical key.
+// Older builds keyed by status-sample UUID, which produced duplicate
+// rows when the same player was also tracked via Query / log backfill
+// (both of those always use the lowercased name). This walks any record
+// whose key disagrees with its display name and merges it into the
+// name-keyed record. Idempotent and safe to run on every load.
+function playerKeyFor(player) {
+  const name = player && player.name;
+  if (name && String(name).trim()) return String(name).trim().toLowerCase();
+  const id = player && player.id;
+  return id ? String(id).trim().toLowerCase() : "";
+}
+
+function mergeDuplicatePlayerKeys(stats) {
+  if (!stats || !stats.players) return;
+  for (const [key, record] of Object.entries(stats.players)) {
+    const preferred = record && record.name ? String(record.name).trim().toLowerCase() : "";
+    if (!preferred || preferred === key) continue;
+    const target = stats.players[preferred];
+    if (target) {
+      target.totalMs = (target.totalMs || 0) + (record.totalMs || 0);
+      target.sessions = (target.sessions || 0) + (record.sessions || 0);
+      target.firstSeenAt = minIso(target.firstSeenAt, record.firstSeenAt);
+      target.lastSeenAt = maxIso(target.lastSeenAt, record.lastSeenAt);
+      target.name = target.name || record.name;
+    } else {
+      stats.players[preferred] = { ...record };
+    }
+    delete stats.players[key];
+    if (stats.active && stats.active[key]) {
+      const incoming = stats.active[key];
+      const existing = stats.active[preferred];
+      if (existing) {
+        existing.startedAt = Math.min(existing.startedAt, incoming.startedAt);
+        existing.lastSeenAt = Math.max(existing.lastSeenAt || 0, incoming.lastSeenAt || 0);
+        existing.name = existing.name || incoming.name;
+      } else {
+        stats.active[preferred] = incoming;
+      }
+      delete stats.active[key];
+    }
+  }
+}
+
+function minIso(a, b) {
+  if (!a) return b || null;
+  if (!b) return a;
+  return new Date(a).getTime() <= new Date(b).getTime() ? a : b;
+}
+
+function maxIso(a, b) {
+  if (!a) return b || null;
+  if (!b) return a;
+  return new Date(a).getTime() >= new Date(b).getTime() ? a : b;
 }
 
 function closeSession(stats, key, fallbackEndTime) {
@@ -86,7 +143,7 @@ function updatePlayerDurations(stats, observed, serverOnline, now, options = {})
 
   const seenKeys = new Set();
   for (const player of observed.players) {
-    const key = (player.id || player.name || "").trim().toLowerCase();
+    const key = playerKeyFor(player);
     if (!key) continue;
     seenKeys.add(key);
     const existing = stats.players[key] || {
@@ -215,5 +272,7 @@ module.exports = {
   closeStaleSessions,
   updatePlayerDurations,
   buildPlayerViews,
-  createPersister
+  createPersister,
+  mergeDuplicatePlayerKeys,
+  playerKeyFor
 };
