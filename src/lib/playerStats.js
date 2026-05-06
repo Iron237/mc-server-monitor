@@ -33,6 +33,8 @@ function ensureServerStats(playerStats, serverId) {
       players: {},
       active: {},
       importedSessions: {},
+      deaths: {},
+      importedDeaths: {},
       logBackfill: null,
       lastUpdatedAt: null
     };
@@ -41,6 +43,8 @@ function ensureServerStats(playerStats, serverId) {
   if (!stats.players) stats.players = {};
   if (!stats.active) stats.active = {};
   if (!stats.importedSessions) stats.importedSessions = {};
+  if (!stats.deaths) stats.deaths = {};
+  if (!stats.importedDeaths) stats.importedDeaths = {};
   mergeDuplicatePlayerKeys(stats);
   return stats;
 }
@@ -215,7 +219,19 @@ function buildPlayerViews(stats, now) {
     .sort((a, b) => b.totalMs - a.totalMs)
     .slice(0, 100);
 
-  return { online, leaderboard };
+  const deathLeaderboard = Object.entries(stats.deaths || {})
+    .map(([key, record]) => ({
+      key,
+      name: record.name,
+      count: record.count || 0,
+      lastAt: record.lastAt || null,
+      lastCause: record.lastCause || null,
+      firstAt: record.firstAt || null
+    }))
+    .sort((a, b) => b.count - a.count || (b.lastAt || "").localeCompare(a.lastAt || ""))
+    .slice(0, 100);
+
+  return { online, leaderboard, deathLeaderboard };
 }
 
 function createPersister(statsPath, getPayload) {

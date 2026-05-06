@@ -5,8 +5,10 @@ const assert = require("node:assert/strict");
 
 const {
   parsePlayerLogEvent,
+  parsePlayerDeathEvent,
   parseLogTimestamp,
   parseLogSessions,
+  parseLogDeaths,
   dateFromLogFileName,
   monthIndex,
   importLogBackfill,
@@ -127,5 +129,91 @@ test("importLogBackfill skips already-imported sessions", () => {
   const second = importLogBackfill("s1", cfg, stats, Date.now(), {});
   assert.equal(second.importedSessions, 0);
   assert.equal(stats.players.foo.totalMs, 30 * 60 * 1000);
+  fs.rmSync(dir, { recursive: true, force: true });
+});
+
+test("parsePlayerDeathEvent recognises common vanilla death messages", () => {
+  const cases = [
+    ["[Server thread/INFO]: IronGod777 was slain by Zombie", "IronGod777", "was slain by Zombie"],
+    ["[Server thread/INFO]: Kang62 was blown up by Creeper", "Kang62", "was blown up by Creeper"],
+    ["[Server thread/INFO]: Couplarity fell from a high place", "Couplarity", "fell from a high place"],
+    ["[Server thread/INFO]: White_Ming drowned", "White_Ming", "drowned"],
+    ["[Server thread/INFO]: White_Ming was killed by magic", "White_Ming", "was killed by magic"],
+    ["[Server thread/INFO]: White_Ming was killed by IronGod777", "White_Ming", "was killed by IronGod777"],
+    ["[Server thread/INFO]: White_Ming hit the ground too hard", "White_Ming", "hit the ground too hard"],
+    ["[Server thread/INFO]: White_Ming was struck by lightning", "White_Ming", "was struck by lightning"],
+    ["[Server thread/INFO]: White_Ming starved to death", "White_Ming", "starved to death"],
+    ["[Server thread/INFO]: White_Ming fell out of the world", "White_Ming", "fell out of the world"],
+    ["[Server thread/INFO]: White_Ming withered away", "White_Ming", "withered away"],
+    ["[Server thread/INFO]: White_Ming tried to swim in lava to escape Zombie", "White_Ming", "tried to swim in lava to escape Zombie"]
+  ];
+  for (const [line, player, cause] of cases) {
+    const got = parsePlayerDeathEvent(line);
+    assert.ok(got, `expected death match: ${line}`);
+    assert.equal(got.player, player);
+    assert.equal(got.cause, cause);
+    assert.equal(got.action, "death");
+  }
+});
+
+test("parsePlayerDeathEvent ignores chat lines and join/leave events", () => {
+  // Chat in MC server logs uses <name> brackets; never a death.
+  assert.equal(parsePlayerDeathEvent("[Server thread/INFO]: <IronGod777> was slain by Zombie haha"), null);
+  // Join / leave / connect lines route through parsePlayerLogEvent instead.
+  assert.equal(parsePlayerDeathEvent("[Server thread/INFO]: Kang62 joined the game"), null);
+  assert.equal(parsePlayerDeathEvent("[Server thread/INFO]: Kang62 left the game"), null);
+  // No death keyword.
+  assert.equal(parsePlayerDeathEvent("[Server thread/INFO]: Kang62 said something"), null);
+});
+
+test("parseLogDeaths extracts deaths in file order with timestamps", () => {
+  clearSessionCache();
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "mcsm-"));
+  const file = path.join(dir, "2026-05-04-1.log");
+  fs.writeFileSync(file, [
+    "[2026-05-04T10:00:00] [Server thread/INFO]: Foo joined the game",
+    "[2026-05-04T10:05:00] [Server thread/INFO]: Foo was slain by Zombie",
+    "[2026-05-04T10:10:00] [Server thread/INFO]: Foo was blown up by Creeper",
+    "[2026-05-04T10:15:00] [Server thread/INFO]: Foo left the game"
+  ].join("\n"));
+  const stat = fs.statSync(file);
+  const deaths = parseLogDeaths([{ path: file, name: path.basename(file), size: stat.size, mtimeMs: stat.mtimeMs }]);
+  assert.equal(deaths.length, 2);
+  assert.equal(deaths[0].playerName, "Foo");
+  assert.equal(deaths[0].cause, "was slain by Zombie");
+  assert.equal(deaths[1].cause, "was blown up by Creeper");
+  fs.rmSync(dir, { recursive: true, force: true });
+});
+
+test("importLogBackfill counts deaths only when deathTrackingEnabled", () => {
+  clearSessionCache();
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "mcsm-"));
+  const file = path.join(dir, "2026-05-04-1.log");
+  fs.writeFileSync(file, [
+    "[2026-05-04T10:00:00] [Server thread/INFO]: Foo joined the game",
+    "[2026-05-04T10:05:00] [Server thread/INFO]: Foo was slain by Zombie",
+    "[2026-05-04T10:08:00] [Server thread/INFO]: Foo was blown up by Creeper",
+    "[2026-05-04T10:15:00] [Server thread/INFO]: Foo left the game"
+  ].join("\n"));
+  const stats = { players: {}, active: {}, importedSessions: {}, importedDeaths: {}, deaths: {}, logBackfill: null };
+
+  // creative server: tracking off
+  const offCfg = { logBackfillEnabled: true, logPath: dir, logBackfillMaxFiles: 10, logBackfillMaxSessionHours: 24, deathTrackingEnabled: false };
+  const off = importLogBackfill("s1", offCfg, stats, Date.now(), {});
+  assert.equal(off.importedDeaths, 0);
+  assert.equal(Object.keys(stats.deaths).length, 0);
+
+  // survival server: tracking on
+  const onCfg = { ...offCfg, deathTrackingEnabled: true };
+  const on1 = importLogBackfill("s1", onCfg, stats, Date.now(), {});
+  assert.equal(on1.importedDeaths, 2);
+  assert.equal(stats.deaths.foo.count, 2);
+  assert.equal(stats.deaths.foo.lastCause, "was blown up by Creeper");
+
+  // re-running is idempotent (same import keys)
+  const on2 = importLogBackfill("s1", onCfg, stats, Date.now(), {});
+  assert.equal(on2.importedDeaths, 0);
+  assert.equal(stats.deaths.foo.count, 2);
+
   fs.rmSync(dir, { recursive: true, force: true });
 });

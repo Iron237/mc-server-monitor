@@ -37,6 +37,9 @@ const elements = {
   onlinePlayersTable: $("#onlinePlayersTable"),
   leaderboardLine: $("#leaderboardLine"),
   leaderboard: $("#leaderboard"),
+  deathPanel: $("#deathPanel"),
+  deathLine: $("#deathLine"),
+  deathLeaderboard: $("#deathLeaderboard"),
   historyChart: $("#historyChart")
 };
 
@@ -261,6 +264,7 @@ function renderSelected(selected, payload) {
   renderPlayers(players, selected.tracking, selected.server.playersOnline || 0);
   renderBackfill(selected);
   renderLeaderboard(selected, players);
+  renderDeathLeaderboard(selected, players);
   drawHistory(selected.history || []);
 
   elements.hostLine.textContent = system.hostname
@@ -413,7 +417,41 @@ function renderLeaderboard(selected, players) {
   elements.leaderboard.replaceChildren(...board.slice(0, 10).map((player, index) => el("div", "leaderboard-item",
     el("span", "rank", document.createTextNode(String(index + 1))),
     el("span", "leaderboard-name", document.createTextNode(player.name + (player.online ? ` · ${window.t("online")}` : ""))),
-    el("span", "leaderboard-time", document.createTextNode(formatDuration(player.totalMs)))
+    el("span", "leaderboard-time", document.createTextNode(formatDurationHM(player.totalMs))),
+    el("span", "leaderboard-meta", document.createTextNode(
+      window.t("lastSeenLabel") + " " + formatLastSeen(player.lastSeenAt)
+    ))
+  )));
+}
+
+function renderDeathLeaderboard(selected, players) {
+  if (!elements.deathPanel) return;
+  const enabled = selected && selected.config && selected.config.deathTrackingEnabled;
+  if (!enabled) {
+    elements.deathPanel.style.display = "none";
+    return;
+  }
+  elements.deathPanel.style.display = "";
+  const board = (players && players.deathLeaderboard) || [];
+  const total = board.reduce((sum, item) => sum + (item.count || 0), 0);
+  if (elements.deathLine) {
+    elements.deathLine.textContent = board.length
+      ? window.t("deathLeaderboardCount", { players: board.length, total })
+      : window.t("noDeathData");
+  }
+  if (!elements.deathLeaderboard) return;
+  if (!board.length) {
+    elements.deathLeaderboard.replaceChildren(emptyDiv(window.t("waitingDeaths")));
+    return;
+  }
+  elements.deathLeaderboard.replaceChildren(...board.slice(0, 10).map((player, index) => el("div", "leaderboard-item",
+    el("span", "rank", document.createTextNode(String(index + 1))),
+    el("span", "leaderboard-name", document.createTextNode(player.name)),
+    el("span", "leaderboard-time", document.createTextNode(window.t("deathCount", { n: player.count }))),
+    el("span", "leaderboard-meta", document.createTextNode(
+      (player.lastAt ? window.t("lastDeathLabel") + " " + formatLastSeen(player.lastAt) : "")
+        + (player.lastCause ? "  ·  " + player.lastCause : "")
+    ))
   )));
 }
 
@@ -552,6 +590,42 @@ function formatDuration(ms) {
   if (days > 0) return window.t("daysHours", { d: days, h: hours });
   if (hours > 0) return window.t("hoursMinutes", { h: hours, m: minutes });
   return window.t("minutes", { n: minutes });
+}
+
+// Always render as `H 小时 M 分钟` for the cumulative leaderboard so that even
+// 207h reads as 207h instead of "8d 15h".
+function formatDurationHM(ms) {
+  if (!Number.isFinite(ms) || ms <= 0) return window.t("zeroMinutes");
+  const totalMinutes = Math.floor(ms / 60000);
+  const hours = Math.floor(totalMinutes / 60);
+  const minutes = totalMinutes % 60;
+  return window.t("hoursMinutes", { h: hours, m: minutes });
+}
+
+// Last-seen timestamp formatter:
+//   - within 24h: relative "H 小时 M 分 S 秒前" (with sensible truncation)
+//   - 24h+: absolute "YYYY-MM-DD HH时"
+function formatLastSeen(iso, nowMs = Date.now()) {
+  if (!iso) return "—";
+  const ts = new Date(iso).getTime();
+  if (!Number.isFinite(ts)) return "—";
+  const delta = nowMs - ts;
+  if (delta < 0) return window.t("justNow");
+  if (delta < 86400000) {
+    const totalSeconds = Math.floor(delta / 1000);
+    const h = Math.floor(totalSeconds / 3600);
+    const m = Math.floor((totalSeconds % 3600) / 60);
+    const s = totalSeconds % 60;
+    if (h > 0) return window.t("agoHMS", { h, m, s });
+    if (m > 0) return window.t("agoMS", { m, s });
+    return window.t("agoS", { s });
+  }
+  const d = new Date(ts);
+  const y = d.getFullYear();
+  const mo = String(d.getMonth() + 1).padStart(2, "0");
+  const day = String(d.getDate()).padStart(2, "0");
+  const hr = String(d.getHours()).padStart(2, "0");
+  return window.t("lastSeenAbsolute", { y, mo, d: day, h: hr });
 }
 
 function formatBytes(bytes) {

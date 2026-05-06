@@ -38,6 +38,10 @@
     "logBackfillEnabled": true,
     "logPath": "C:/Users/123/Desktop/航空学server/logs",
 
+    // 死亡榜统计 —— 仅生存服建议开启（创造服没死亡意义）。
+    // 数据从同一份 logs 里解析（"X was slain by Y" / "X drowned" 等）。
+    "deathTrackingEnabled": true,
+
     // 监控这个目录所在磁盘的剩余空间
     "worldPath": "C:/Users/123/Desktop/航空学server/world",
 

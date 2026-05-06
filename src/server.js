@@ -85,6 +85,8 @@ const server = http.createServer(async (request, response) => {
         name: item.name,
         online: item.players.online,
         leaderboard: item.players.leaderboard,
+        deathLeaderboard: item.players.deathLeaderboard || [],
+        deathTrackingEnabled: Boolean(item.config && item.config.deathTrackingEnabled),
         tracking: item.tracking,
         updatedAt: item.lastUpdatedAt
       })));
@@ -99,6 +101,8 @@ const server = http.createServer(async (request, response) => {
       sendJson(response, 200, {
         online: serverState.players.online,
         leaderboard: serverState.players.leaderboard,
+        deathLeaderboard: serverState.players.deathLeaderboard || [],
+        deathTrackingEnabled: Boolean(serverState.config && serverState.config.deathTrackingEnabled),
         tracking: serverState.tracking,
         updatedAt: serverState.lastUpdatedAt
       });
@@ -517,7 +521,7 @@ function createServerState(serverConfig) {
       selector: resourceSelector(serverConfig),
       processes: []
     },
-    players: { online: [], leaderboard: [] },
+    players: { online: [], leaderboard: [], deathLeaderboard: [] },
     backfill: {
       enabled: serverConfig.logBackfillEnabled,
       path: serverConfig.logPath || null,

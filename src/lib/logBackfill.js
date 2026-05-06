@@ -52,6 +52,83 @@ function parsePlayerLogEvent(line) {
   return null;
 }
 
+// Vanilla / NeoForge death message phrases. Order matters within an
+// alternation: longer / more specific phrases must come before their prefix
+// matches (e.g. "was killed by magic" before "was killed by"). The full
+// message tail (with killer / context) is preserved as `cause`.
+const DEATH_PHRASES = [
+  "was burnt to a crisp whilst fighting",
+  "was killed while trying to hurt",
+  "was knocked into the void by",
+  "was frozen to death by",
+  "was poked to death by a sweet berry bush",
+  "didn't want to live in the same world as",
+  "didnt want to live in the same world as",
+  "fell from a high place",
+  "fell out of the world",
+  "discovered the floor was lava",
+  "experienced kinetic energy",
+  "tried to swim in lava",
+  "was blown up by",
+  "was burnt to a crisp",
+  "was struck by lightning",
+  "was doomed to fall by",
+  "was doomed to fall",
+  "was knocked into the void",
+  "was killed by magic",
+  "was killed by",
+  "was slain by",
+  "was shot by",
+  "was squashed by",
+  "was impaled by",
+  "was stung to death",
+  "was pricked to death",
+  "was squished too much",
+  "was squished by",
+  "was impaled on a stalagmite",
+  "was impaled",
+  "walked into a cactus while trying to escape",
+  "walked into a cactus",
+  "walked into fire whilst fighting",
+  "walked into fire",
+  "went up in flames",
+  "burned to death",
+  "froze to death",
+  "starved to death",
+  "suffocated in a wall",
+  "withered away",
+  "hit the ground too hard",
+  "drowned",
+  "blew up",
+  "died"
+];
+
+function parsePlayerDeathEvent(line) {
+  // Skip chat (always shown with angle-bracketed name) and the join / leave /
+  // connect events the session parser already owns.
+  if (/<[A-Za-z0-9_]{3,16}>/.test(line)) return null;
+  if (/joined the game|left the game|lost connection|logged in with entity id/.test(line)) return null;
+
+  // Trim down to the message body. Server logs prefix lines with one or more
+  // "[...]" segments terminated by "]:". We anchor on the last such marker so
+  // timestamps and thread/category labels can never masquerade as a player.
+  let body = line;
+  const colonIdx = line.lastIndexOf("]:");
+  if (colonIdx !== -1) body = line.slice(colonIdx + 2);
+  body = body.trim();
+
+  const m = body.match(/^([A-Za-z0-9_]{3,16})\s+(.+)$/);
+  if (!m) return null;
+  const player = m[1];
+  const tail = m[2];
+  for (const phrase of DEATH_PHRASES) {
+    if (tail.startsWith(phrase)) {
+      return { action: "death", player, cause: tail };
+    }
+  }
+  return null;
+}
+
 function toMillis(value) {
   if (!value) return 0;
   return Number(String(value).padEnd(3, "0").slice(0, 3));
@@ -129,7 +206,9 @@ function parseFileSessions(file) {
   let previousTimestamp = null;
   let dayOffsetMs = 0;
   for (const line of text.split(/\r?\n/)) {
-    const event = parsePlayerLogEvent(line);
+    const sessionEvent = parsePlayerLogEvent(line);
+    const deathEvent = sessionEvent ? null : parsePlayerDeathEvent(line);
+    const event = sessionEvent || deathEvent;
     if (!event) continue;
     const timestamp = parseLogTimestamp(line, fallbackDate);
     if (!timestamp) continue;
@@ -138,7 +217,9 @@ function parseFileSessions(file) {
     }
     const eventTime = timestamp.getTime() + dayOffsetMs;
     previousTimestamp = eventTime;
-    events.push({ player: event.player, action: event.action, eventTime, file });
+    const record = { player: event.player, action: event.action, eventTime, file };
+    if (event.action === "death") record.cause = event.cause;
+    events.push(record);
   }
   if (sessionCache.size > 256) {
     const oldestKey = sessionCache.keys().next().value;
@@ -154,6 +235,7 @@ function parseLogSessions(files) {
   for (const file of files) {
     const events = parseFileSessions(file);
     for (const event of events) {
+      if (event.action !== "join" && event.action !== "left") continue;
       const playerKey = event.player.toLowerCase();
       if (event.action === "join") {
         openSessions.set(playerKey, {
@@ -183,8 +265,31 @@ function parseLogSessions(files) {
   return completed;
 }
 
+function parseLogDeaths(files) {
+  const deaths = [];
+  for (const file of files) {
+    const events = parseFileSessions(file);
+    for (const event of events) {
+      if (event.action !== "death") continue;
+      deaths.push({
+        playerKey: event.player.toLowerCase(),
+        playerName: event.player,
+        eventTime: event.eventTime,
+        cause: event.cause,
+        sourceFile: file.name,
+        sourcePath: file.path
+      });
+    }
+  }
+  return deaths;
+}
+
 function sessionKey(session) {
   return `${session.playerKey}:${session.startAt}:${session.endAt}`;
+}
+
+function deathKey(death) {
+  return `${death.playerKey}:${death.eventTime}`;
 }
 
 function summarizeLogFiles(files, sessions, stats) {
@@ -241,6 +346,8 @@ function importLogBackfill(serverId, serverConfig, stats, now, options = {}) {
 
   const startedAt = Date.now();
   if (!stats.importedSessions) stats.importedSessions = {};
+  if (!stats.importedDeaths) stats.importedDeaths = {};
+  if (!stats.deaths) stats.deaths = {};
 
   try {
     const files = listLogFiles(serverConfig.logPath, serverConfig.logBackfillMaxFiles);
@@ -280,6 +387,42 @@ function importLogBackfill(serverId, serverConfig, stats, now, options = {}) {
       importedMs += duration;
     }
 
+    let importedDeaths = 0;
+    let parsedDeaths = 0;
+    if (serverConfig.deathTrackingEnabled) {
+      const deaths = parseLogDeaths(files);
+      parsedDeaths = deaths.length;
+      for (const death of deaths) {
+        const key = deathKey(death);
+        if (stats.importedDeaths[key]) continue;
+        if (options.dryRun) continue;
+
+        const record = stats.deaths[death.playerKey] || {
+          name: death.playerName,
+          count: 0,
+          firstAt: new Date(death.eventTime).toISOString(),
+          lastAt: null,
+          lastCause: null
+        };
+        record.name = death.playerName;
+        record.count += 1;
+        record.firstAt = minIso(record.firstAt, death.eventTime);
+        // Always keep the most recent cause as the "headline".
+        if (!record.lastAt || new Date(record.lastAt).getTime() <= death.eventTime) {
+          record.lastAt = new Date(death.eventTime).toISOString();
+          record.lastCause = death.cause;
+        }
+        stats.deaths[death.playerKey] = record;
+        stats.importedDeaths[key] = {
+          player: death.playerName,
+          at: new Date(death.eventTime).toISOString(),
+          cause: death.cause,
+          source: death.sourceFile
+        };
+        importedDeaths += 1;
+      }
+    }
+
     const result = {
       enabled: true,
       path: serverConfig.logPath,
@@ -287,11 +430,14 @@ function importLogBackfill(serverId, serverConfig, stats, now, options = {}) {
       mode: options.dryRun ? "scan" : options.force ? "manual" : "auto",
       importedSessions,
       importedMs,
+      importedDeaths,
+      parsedDeaths,
+      deathTrackingEnabled: Boolean(serverConfig.deathTrackingEnabled),
       scannedFiles: files.length,
       parsedSessions: sessions.length,
       files: summarizeLogFiles(files, sessions, stats),
       durationMs: Date.now() - startedAt,
-      lastImportedAt: importedSessions > 0 ? new Date(now).toISOString() : stats.logBackfill?.lastImportedAt || null,
+      lastImportedAt: (importedSessions > 0 || importedDeaths > 0) ? new Date(now).toISOString() : stats.logBackfill?.lastImportedAt || null,
       error: null
     };
     stats.logBackfill = result;
@@ -325,14 +471,18 @@ function clearSessionCache() {
 module.exports = {
   listLogFiles,
   parsePlayerLogEvent,
+  parsePlayerDeathEvent,
   parseLogTimestamp,
   parseLogSessions,
+  parseLogDeaths,
   parseFileSessions,
   dateFromLogFileName,
   monthIndex,
   sessionKey,
+  deathKey,
   summarizeLogFiles,
   importLogBackfill,
   emptyBackfill,
-  clearSessionCache
+  clearSessionCache,
+  DEATH_PHRASES
 };
