@@ -9,7 +9,8 @@ const { loadAppConfig, publicServerConfig, resourceSelector } = require("./lib/c
 const { sumNumbers } = require("./lib/util");
 const { pingMinecraftServer } = require("./lib/mcProtocol");
 const { queryMinecraftServer } = require("./lib/mcQuery");
-const { readServerTps } = require("./lib/rcon");
+const { readServerHealth } = require("./lib/rcon");
+const { createAlertEngine } = require("./lib/alerts");
 const { collectSystemResources, collectAllServerProcesses } = require("./lib/processMon");
 const { importLogBackfill } = require("./lib/logBackfill");
 const {
@@ -31,6 +32,10 @@ const publicDir = path.join(rootDir, "public");
 const statsPath = path.join(config.dataDir, "player-stats.json");
 const startTime = Date.now();
 const sseHub = createSseHub();
+const alertEngine = createAlertEngine({
+  tpsThreshold: config.alertTpsThreshold,
+  sustainedMs: config.alertTpsDurationMs
+});
 
 const state = {
   app: {
@@ -266,16 +271,30 @@ async function pollServer(serverState, now, processes) {
     }
 
     if (serverConfig.rconEnabled && serverConfig.rconPort && statusResult.online) {
-      const tps = await readServerTps({
+      const health = await readServerHealth({
         host: serverConfig.rconHost || serverConfig.host,
         port: serverConfig.rconPort,
         password: serverConfig.rconPassword,
         timeoutMs: config.rconTimeoutMs
       });
-      serverState.tps = tps;
+      serverState.tps = health.tps;
+      serverState.mspt = health.mspt;
+      serverState.pings = health.pings;
     } else {
       serverState.tps = { ok: false, error: serverConfig.rconEnabled ? "RCON not configured" : null };
+      serverState.mspt = { ok: false, error: null };
+      serverState.pings = { ok: false, error: null, players: [] };
     }
+
+    const tpsValue = serverState.tps && serverState.tps.ok ? serverState.tps.tps1m : null;
+    const alertEvent = alertEngine.evaluate(serverState.id, tpsValue, now);
+    if (alertEvent) {
+      serverState.alerts = (serverState.alerts || []).concat(alertEvent).slice(-20);
+      sseHub.broadcast("alert", alertEvent);
+      const tag = alertEvent.type === "tps-low" ? "ALERT" : "RECOVERED";
+      console.warn(`[${tag}] ${serverState.id} tps=${alertEvent.currentTps ?? alertEvent.recoveredTps} threshold=${alertEvent.threshold} duration=${Math.round(alertEvent.durationMs / 1000)}s`);
+    }
+    serverState.activeIncident = alertEngine.getIncident(serverState.id);
 
     const observed = chooseObservedPlayers(serverState, statusResult, queryResult);
     const stats = ensureServerStats(playerStats, serverState.id);
@@ -404,7 +423,8 @@ function addHistoryPoint(serverState, now) {
     playersMax: serverState.server.playersMax,
     processCpuPercent: processCpu,
     processMemoryBytes: processMemory,
-    tps: serverState.tps && serverState.tps.ok ? serverState.tps.tps1m : null
+    tps: serverState.tps && serverState.tps.ok ? serverState.tps.tps1m : null,
+    mspt: serverState.mspt && serverState.mspt.ok ? serverState.mspt.avg : null
   });
   if (serverState.history.length > config.historyLimit) {
     serverState.history.splice(0, serverState.history.length - config.historyLimit);
@@ -426,7 +446,12 @@ function buildStatusPayload() {
     summary: {
       servers: state.servers.length,
       onlineServers: state.servers.filter((item) => item.server.online).length,
-      playersOnline: state.servers.reduce((sum, item) => sum + (item.server.playersOnline || 0), 0)
+      playersOnline: state.servers.reduce((sum, item) => sum + (item.server.playersOnline || 0), 0),
+      activeIncidents: alertEngine.snapshot()
+    },
+    alertConfig: {
+      tpsThreshold: config.alertTpsThreshold,
+      sustainedMs: config.alertTpsDurationMs
     },
     servers: state.servers
   };
@@ -510,6 +535,10 @@ function createServerState(serverConfig) {
       metadata: {}
     },
     tps: { ok: false, error: null },
+    mspt: { ok: false, error: null },
+    pings: { ok: false, error: null, players: [] },
+    alerts: [],
+    activeIncident: null,
     tracking: {
       source: "unavailable",
       accuracy: "none",

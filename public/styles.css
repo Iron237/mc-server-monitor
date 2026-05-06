@@ -298,8 +298,27 @@ h2 { font-size: 18px; line-height: 1.3; }
   font-weight: 700;
 }
 .tps-line.show { display: block; }
+.tps-line.warn { background: rgba(183, 121, 31, 0.14); color: var(--amber); }
+.tps-line.hot  { background: rgba(191, 61, 50, 0.14); color: var(--red); }
 
 .process-list { display: grid; gap: 10px; margin-top: 18px; }
+
+.alert-banner {
+  display: grid;
+  gap: 6px;
+  margin: 14px 0 0;
+  padding: 14px 18px;
+  border-radius: 8px;
+  border: 1px solid rgba(191, 61, 50, 0.36);
+  background: rgba(191, 61, 50, 0.10);
+  color: var(--red);
+  font-weight: 700;
+  box-shadow: var(--shadow);
+  transition: box-shadow 320ms ease;
+}
+.alert-banner.flash { box-shadow: 0 0 0 4px rgba(191, 61, 50, 0.30), var(--shadow); }
+.alert-banner .alert-row { display: flex; gap: 10px; align-items: baseline; flex-wrap: wrap; }
+.alert-banner span { color: var(--text); font-weight: 400; }
 
 .sync-button {
   min-height: 34px;
