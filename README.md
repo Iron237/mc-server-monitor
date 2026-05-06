@@ -92,6 +92,29 @@ Loaded 2 server(s) from G:\mc-server-monitor\servers.jsonc
 | `logBackfillMaxFiles` | 默认 80，扫描最近的 N 个 .log/.log.gz |
 | `logBackfillMaxSessionHours` | 默认 24，超过这个时长的会话视为日志缺失，丢弃 |
 | `deathTrackingEnabled` | 解析日志中的死亡消息计入「死亡榜」（建议仅生存服开启） |
+| `worldPath` | 既显示磁盘剩余，也作为存档体积曲线的采样目标 |
+
+## 通知（Webhook）
+
+复制模板再改：
+
+```powershell
+Copy-Item webhooks.example.jsonc webhooks.jsonc
+notepad webhooks.jsonc
+```
+
+支持的通道：
+
+| `type` | 说明 |
+|---|---|
+| `serverchan` | Server酱 Turbo（微信公众号推送，免费 5 条/天） |
+| `pushplus` | PushPlus（微信、邮箱、钉钉等多通道；需要 token） |
+| `wxpusher` | WxPusher（微信公众号 + App；需要 appToken） |
+| `discord` | Discord incoming webhook |
+| `slack` | Slack incoming webhook |
+| `generic` | 任意 JSON POST（自己中转到企业微信群机器人 / Bark / IFTTT 等） |
+
+每条 webhook 的 `events` 字段过滤事件（默认订阅全部）。事件类型：`tps-low`、`tps-recovered`、`server-online`、`server-offline`。
 | `rconEnabled` / `rconHost` / `rconPort` / `rconPassword` | 通过 RCON 读 TPS |
 
 ## 准确统计在线时长
