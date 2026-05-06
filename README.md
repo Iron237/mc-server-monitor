@@ -91,6 +91,7 @@ Loaded 2 server(s) from G:\mc-server-monitor\servers.jsonc
 | `logBackfillEnabled` / `logPath` | 启用日志回填 |
 | `logBackfillMaxFiles` | 默认 80，扫描最近的 N 个 .log/.log.gz |
 | `logBackfillMaxSessionHours` | 默认 24，超过这个时长的会话视为日志缺失，丢弃 |
+| `deathTrackingEnabled` | 解析日志中的死亡消息计入「死亡榜」（建议仅生存服开启） |
 | `rconEnabled` / `rconHost` / `rconPort` / `rconPassword` | 通过 RCON 读 TPS |
 
 ## 准确统计在线时长

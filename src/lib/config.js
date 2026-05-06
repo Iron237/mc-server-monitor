@@ -39,6 +39,7 @@ function normalizeServerConfig(item, index) {
     logPath,
     logBackfillMaxFiles: Math.max(1, toInt(item.logBackfillMaxFiles, envInt("LOG_BACKFILL_MAX_FILES", 80))),
     logBackfillMaxSessionHours: Math.max(1, toInt(item.logBackfillMaxSessionHours, envInt("LOG_BACKFILL_MAX_SESSION_HOURS", 24))),
+    deathTrackingEnabled: toBool(item.deathTrackingEnabled, false),
     worldPath,
     rconEnabled: toBool(item.rconEnabled, Boolean(rconPort && rconPassword)),
     rconHost: rconHost || String(item.host || "127.0.0.1"),
@@ -116,6 +117,7 @@ function loadServerConfigs(rootDir) {
     logPath: envString("MC_LOG_PATH", ""),
     logBackfillMaxFiles: envInt("MC_LOG_BACKFILL_MAX_FILES", envInt("LOG_BACKFILL_MAX_FILES", 80)),
     logBackfillMaxSessionHours: envInt("MC_LOG_BACKFILL_MAX_SESSION_HOURS", envInt("LOG_BACKFILL_MAX_SESSION_HOURS", 24)),
+    deathTrackingEnabled: envBool("MC_DEATH_TRACKING_ENABLED", false),
     worldPath: envString("MC_WORLD_PATH", ""),
     rconEnabled: envBool("MC_RCON_ENABLED", false),
     rconHost: envString("MC_RCON_HOST", ""),
@@ -137,6 +139,7 @@ function publicServerConfig(serverConfig) {
     processPort: serverConfig.processPort,
     logBackfillEnabled: serverConfig.logBackfillEnabled,
     logPath: serverConfig.logPath || null,
+    deathTrackingEnabled: Boolean(serverConfig.deathTrackingEnabled),
     worldPath: serverConfig.worldPath || null,
     rconEnabled: serverConfig.rconEnabled,
     resourceMode: serverConfig.resourceMode

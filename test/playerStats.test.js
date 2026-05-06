@@ -61,6 +61,22 @@ test("buildPlayerViews exposes online and leaderboard sorted", () => {
   const views = buildPlayerViews(stats, Date.now());
   assert.equal(views.online[0].name, "A");
   assert.equal(views.leaderboard[0].name, "B");
+  assert.deepEqual(views.deathLeaderboard, []);
+});
+
+test("buildPlayerViews produces deathLeaderboard sorted by count then recency", () => {
+  const stats = freshStats();
+  stats.deaths = {
+    a: { name: "Alpha", count: 5, firstAt: "2026-04-01T00:00:00.000Z", lastAt: "2026-04-29T10:00:00.000Z", lastCause: "was slain by Zombie" },
+    b: { name: "Bravo", count: 12, firstAt: "2026-04-01T00:00:00.000Z", lastAt: "2026-04-29T11:00:00.000Z", lastCause: "fell from a high place" },
+    c: { name: "Charlie", count: 5, firstAt: "2026-04-01T00:00:00.000Z", lastAt: "2026-04-30T00:00:00.000Z", lastCause: "drowned" }
+  };
+  const views = buildPlayerViews(stats, Date.now());
+  assert.equal(views.deathLeaderboard[0].name, "Bravo");
+  assert.equal(views.deathLeaderboard[0].count, 12);
+  // tie on count → newer lastAt wins
+  assert.equal(views.deathLeaderboard[1].name, "Charlie");
+  assert.equal(views.deathLeaderboard[2].name, "Alpha");
 });
 
 test("playerKeyFor prefers display name over id", () => {

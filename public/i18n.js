@@ -74,7 +74,19 @@ window.I18N = {
     hoursMinutes: "{h} 小时 {m} 分钟",
     daysHours: "{d} 天 {h} 小时",
     zeroMinutes: "0 分钟",
-    tps: "TPS"
+    tps: "TPS",
+    lastSeenLabel: "上次",
+    justNow: "刚刚",
+    agoHMS: "{h} 小时 {m} 分 {s} 秒前",
+    agoMS: "{m} 分 {s} 秒前",
+    agoS: "{s} 秒前",
+    lastSeenAbsolute: "{y}-{mo}-{d} {h}时",
+    deathLeaderboard: "死亡榜",
+    deathLeaderboardCount: "{players} 名玩家 · 共 {total} 次",
+    noDeathData: "暂无死亡记录（点同步日志按钮拉取）",
+    waitingDeaths: "等待死亡数据",
+    deathCount: "{n} 次",
+    lastDeathLabel: "最近"
   },
   en: {
     eyebrow: "Minecraft Monitor",
@@ -149,7 +161,19 @@ window.I18N = {
     hoursMinutes: "{h}h {m}m",
     daysHours: "{d}d {h}h",
     zeroMinutes: "0 min",
-    tps: "TPS"
+    tps: "TPS",
+    lastSeenLabel: "Last",
+    justNow: "just now",
+    agoHMS: "{h}h {m}m {s}s ago",
+    agoMS: "{m}m {s}s ago",
+    agoS: "{s}s ago",
+    lastSeenAbsolute: "{y}-{mo}-{d} {h}:00",
+    deathLeaderboard: "Death Leaderboard",
+    deathLeaderboardCount: "{players} players · {total} deaths",
+    noDeathData: "No deaths recorded yet (click Sync Logs to import)",
+    waitingDeaths: "Waiting for death data",
+    deathCount: "{n}×",
+    lastDeathLabel: "Last"
   }
 };
 
