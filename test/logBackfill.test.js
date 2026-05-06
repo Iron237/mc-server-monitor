@@ -132,6 +132,56 @@ test("importLogBackfill skips already-imported sessions", () => {
   fs.rmSync(dir, { recursive: true, force: true });
 });
 
+test("parseSparkPingLine extracts player name + ms from real NeoForge fixture", () => {
+  const { parseSparkPingLine } = require("../src/lib/logBackfill");
+  // Captured verbatim from NeoForge 1.21.1 + spark on the user's box:
+  const line = "[075月2026 01:35:43.596] [spark-worker-pool-1-thread-2/INFO] [net.minecraft.server.MinecraftServer/]: [⚡] Player IronGod777 has 0 ms ping.";
+  const got = parseSparkPingLine(line);
+  assert.deepEqual(got, { action: "ping", player: "IronGod777", ms: 0 });
+});
+
+test("parseSparkPingLine handles fractional ms and rejects unrelated lines", () => {
+  const { parseSparkPingLine } = require("../src/lib/logBackfill");
+  assert.deepEqual(
+    parseSparkPingLine("anything [⚡] Player Kang62 has 23.5 ms ping."),
+    { action: "ping", player: "Kang62", ms: 23.5 }
+  );
+  // No lightning marker → must not match (would otherwise eat join/leave lines).
+  assert.equal(parseSparkPingLine("Player IronGod777 has 0 ms ping."), null);
+  // Chat that mentions ping shouldn't match either.
+  assert.equal(parseSparkPingLine("<IronGod777> my ping is 0 ms"), null);
+});
+
+test("extractRecentPings returns latest sample per player from log files", () => {
+  const { parseSparkPingLine, extractRecentPings, clearSessionCache } = require("../src/lib/logBackfill");
+  clearSessionCache();
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "mcsm-pings-"));
+  try {
+    const file = path.join(dir, "latest.log");
+    // Two samples for IronGod777, one for Kang62; we expect the newer one.
+    const lines = [
+      "[2026-05-07T01:30:00] [spark/INFO]: [⚡] Player IronGod777 has 50 ms ping.",
+      "[2026-05-07T01:34:00] [spark/INFO]: [⚡] Player Kang62 has 12 ms ping.",
+      "[2026-05-07T01:35:43] [spark/INFO]: [⚡] Player IronGod777 has 0 ms ping."
+    ];
+    fs.writeFileSync(file, lines.join("\n"));
+    const stat = fs.statSync(file);
+    const recent = extractRecentPings(
+      [{ path: file, name: "latest.log", size: stat.size, mtimeMs: stat.mtimeMs }],
+      365 * 24 * 60 * 60 * 1000 // huge window for the test
+    );
+    assert.equal(recent.length, 2);
+    const iron = recent.find((p) => p.name === "IronGod777");
+    const kang = recent.find((p) => p.name === "Kang62");
+    assert.equal(iron.ms, 0, "should pick the most recent sample (0ms), not 50ms");
+    assert.equal(kang.ms, 12);
+    // Sorted ascending by ms.
+    assert.ok(recent[0].ms <= recent[1].ms);
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
 test("parsePlayerDeathEvent recognises common vanilla death messages", () => {
   const cases = [
     ["[Server thread/INFO]: IronGod777 was slain by Zombie", "IronGod777", "was slain by Zombie"],

@@ -14,7 +14,7 @@ const { createAlertEngine } = require("./lib/alerts");
 const { createWebhookDispatcher } = require("./lib/webhooks");
 const { createWorldSizeSampler } = require("./lib/worldSize");
 const { collectSystemResources, collectAllServerProcesses } = require("./lib/processMon");
-const { importLogBackfill } = require("./lib/logBackfill");
+const { importLogBackfill, extractRecentPings, listLogFiles } = require("./lib/logBackfill");
 const {
   loadPlayerStats,
   ensureServerStats,
@@ -63,6 +63,8 @@ let playerStats = loadPlayerStats(statsPath);
 let pollTimer = null;
 let polling = false;
 let started = false;
+const sparkPingLastFire = new Map();   // serverId -> ms timestamp of last `/spark ping` probe
+const msptHistory = new Map();         // serverId -> [{ at, mspt }] capped ring buffer
 
 fs.mkdirSync(config.dataDir, { recursive: true });
 const persister = createPersister(statsPath, () => playerStats);
@@ -347,11 +349,60 @@ async function pollServer(serverState, now, processes) {
       serverState.mspt = health.mspt;
       serverState.pings = health.pings;
       serverState.dimensions = health.dimensions;
+
+      // Build a rolling MSPT window from the per-poll current value. spark
+      // gives sub-tick precision but its output is unreachable over RCON,
+      // so we settle for poll-cadence sampling — enough to spot a 5-minute
+      // lag spike, not enough to catch a single 200ms tick.
+      if (health.mspt && health.mspt.ok && Number.isFinite(health.mspt.avg)) {
+        const buf = msptHistory.get(serverState.id) || [];
+        buf.push({ at: now, mspt: health.mspt.avg });
+        const cutoff = now - config.msptWindowMs;
+        while (buf.length && buf[0].at < cutoff) buf.shift();
+        msptHistory.set(serverState.id, buf);
+        serverState.msptStats = computeMsptStats(buf);
+      } else {
+        serverState.msptStats = { ok: false, samples: 0 };
+      }
+
+      // Spark broadcasts ping replies asynchronously to chat / console so
+      // the synchronous RCON response is empty. Periodically issue
+      // `spark ping` (no --player) and rely on the log-tail pipeline to
+      // pick up the broadcast on the next poll.
+      if (serverConfig.logBackfillEnabled && serverConfig.logPath) {
+        const lastFire = sparkPingLastFire.get(serverState.id) || 0;
+        if (now - lastFire >= config.sparkPingProbeIntervalMs) {
+          sparkPingLastFire.set(serverState.id, now);
+          rconCommand({
+            host: serverConfig.rconHost || serverConfig.host,
+            port: serverConfig.rconPort,
+            password: serverConfig.rconPassword,
+            timeoutMs: config.rconTimeoutMs
+          }, "spark ping").catch(() => {});
+        }
+      }
     } else {
       serverState.tps = { ok: false, error: serverConfig.rconEnabled ? "RCON not configured" : null };
       serverState.mspt = { ok: false, error: null };
       serverState.pings = { ok: false, error: null, players: [] };
       serverState.dimensions = { ok: false, error: null, dimensions: [] };
+    }
+
+    // Layer log-tailed spark pings on top of whatever readServerHealth saw.
+    // This is what actually delivers per-player ping in the dashboard
+    // because spark's RCON sync response is always empty.
+    if (serverConfig.logBackfillEnabled && serverConfig.logPath) {
+      try {
+        const recentFiles = listLogFiles(serverConfig.logPath, 4);
+        const logged = extractRecentPings(recentFiles, config.sparkPingMaxAgeMs);
+        if (logged.length) {
+          serverState.pings = {
+            ok: true,
+            command: "spark ping (log-tail)",
+            players: logged
+          };
+        }
+      } catch { /* missing logPath / read errors → keep whatever pings we had */ }
     }
 
     const tpsValue = serverState.tps && serverState.tps.ok ? serverState.tps.tps1m : null;
@@ -528,6 +579,25 @@ function addHistoryPoint(serverState, now) {
   }
 }
 
+function computeMsptStats(samples) {
+  if (!samples || !samples.length) return { ok: false, samples: 0 };
+  const sorted = samples.map((s) => s.mspt).sort((a, b) => a - b);
+  const n = sorted.length;
+  const sum = sorted.reduce((s, v) => s + v, 0);
+  const pct = (q) => sorted[Math.min(n - 1, Math.floor(q * n))];
+  return {
+    ok: true,
+    samples: n,
+    current: samples[samples.length - 1].mspt,
+    avg: Number((sum / n).toFixed(2)),
+    p50: Number(pct(0.5).toFixed(2)),
+    p95: Number(pct(0.95).toFixed(2)),
+    p99: Number(pct(0.99).toFixed(2)),
+    peak: Number(sorted[n - 1].toFixed(2)),
+    windowMs: samples[samples.length - 1].at - samples[0].at
+  };
+}
+
 function buildStatusPayload() {
   return {
     app: {
@@ -631,6 +701,7 @@ function createServerState(serverConfig) {
     },
     tps: { ok: false, error: null },
     mspt: { ok: false, error: null },
+    msptStats: { ok: false, samples: 0 },
     pings: { ok: false, error: null, players: [] },
     dimensions: { ok: false, error: null, dimensions: [] },
     worldSize: { history: [], latest: null, projection: null },
