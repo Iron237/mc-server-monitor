@@ -86,7 +86,9 @@ window.I18N = {
     noDeathData: "暂无死亡记录（点同步日志按钮拉取）",
     waitingDeaths: "等待死亡数据",
     deathCount: "{n} 次",
-    lastDeathLabel: "最近"
+    lastDeathLabel: "最近",
+    ping: "延迟",
+    tpsAlertBody: "TPS 已持续低于 {threshold} 共 {minutes} 分钟，最低 {lowest}"
   },
   en: {
     eyebrow: "Minecraft Monitor",
@@ -173,7 +175,9 @@ window.I18N = {
     noDeathData: "No deaths recorded yet (click Sync Logs to import)",
     waitingDeaths: "Waiting for death data",
     deathCount: "{n}×",
-    lastDeathLabel: "Last"
+    lastDeathLabel: "Last",
+    ping: "Ping",
+    tpsAlertBody: "TPS below {threshold} for {minutes} min (lowest {lowest})"
   }
 };
 

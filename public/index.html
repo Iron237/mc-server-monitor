@@ -27,6 +27,8 @@
         </div>
       </header>
 
+      <section id="alertBanner" class="alert-banner" style="display:none" aria-live="polite"></section>
+
       <section class="metric-grid" aria-label="metrics">
         <article class="metric">
           <span class="metric-label" data-i18n="serverOnlineLabel">服务器在线</span>
@@ -105,13 +107,14 @@
               <thead>
                 <tr>
                   <th data-i18n="player">玩家</th>
+                  <th data-i18n="ping">延迟</th>
                   <th data-i18n="currentSession">本次在线</th>
                   <th data-i18n="totalTime">累计在线</th>
                   <th data-i18n="sessions">会话</th>
                 </tr>
               </thead>
               <tbody id="onlinePlayersTable">
-                <tr><td colspan="4" data-i18n="awaitingData">等待数据</td></tr>
+                <tr><td colspan="5" data-i18n="awaitingData">等待数据</td></tr>
               </tbody>
             </table>
           </div>

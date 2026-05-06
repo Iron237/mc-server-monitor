@@ -40,7 +40,8 @@ const elements = {
   deathPanel: $("#deathPanel"),
   deathLine: $("#deathLine"),
   deathLeaderboard: $("#deathLeaderboard"),
-  historyChart: $("#historyChart")
+  historyChart: $("#historyChart"),
+  alertBanner: $("#alertBanner")
 };
 
 let refreshTimer = null;
@@ -96,6 +97,12 @@ function connectSse() {
         const idx = latestPayload.servers.findIndex((s) => s.id === data.id);
         if (idx >= 0) latestPayload.servers[idx] = data.server;
         render(latestPayload);
+      } catch { /* ignore */ }
+    });
+    sse.addEventListener("alert", (event) => {
+      try {
+        const data = JSON.parse(event.data);
+        flashAlertBanner(data);
       } catch { /* ignore */ }
     });
     sse.onerror = () => {
@@ -172,6 +179,40 @@ function scheduleRefresh(intervalMs) {
   refreshTimer = setTimeout(() => fetchStatus(false), Math.max(5000, intervalMs || 15000));
 }
 
+function renderAlertBanner(payload) {
+  if (!elements.alertBanner) return;
+  const incidents = (payload && payload.summary && payload.summary.activeIncidents) || [];
+  const open = incidents.filter((i) => i.alerted);
+  if (open.length === 0) {
+    elements.alertBanner.style.display = "none";
+    elements.alertBanner.replaceChildren();
+    return;
+  }
+  const items = open.map((inc) => {
+    const server = (payload.servers || []).find((s) => s.id === inc.serverId);
+    const name = server ? server.name : inc.serverId;
+    const minutes = Math.round(inc.durationMs / 60000);
+    const lowest = Number.isFinite(inc.lowestTps) ? inc.lowestTps.toFixed(1) : "?";
+    const threshold = (payload.alertConfig && payload.alertConfig.tpsThreshold) || 10;
+    return el("div", "alert-row",
+      el("strong", "", document.createTextNode("⚠ " + name)),
+      el("span", "", document.createTextNode(window.t("tpsAlertBody", { lowest, threshold, minutes })))
+    );
+  });
+  elements.alertBanner.replaceChildren(...items);
+  elements.alertBanner.style.display = "";
+}
+
+// Brief visual pulse when a fresh alert event arrives over SSE so an admin
+// notices without watching the page.
+function flashAlertBanner(event) {
+  if (!elements.alertBanner) return;
+  elements.alertBanner.classList.remove("flash");
+  // Trigger CSS transition restart.
+  void elements.alertBanner.offsetWidth;
+  elements.alertBanner.classList.add("flash");
+}
+
 function render(payload) {
   if (!payload) return;
   const selected = getSelectedServer();
@@ -196,6 +237,7 @@ function render(payload) {
   elements.resourceMetric.textContent = percentText(system.cpuPercent);
   elements.memoryMetric.textContent = `${window.t("memoryLabel")} ${percentText(system.memoryUsedPercent)}`;
 
+  renderAlertBanner(payload);
   renderServerCards(payload.servers);
   renderSelected(selected, payload);
 }
@@ -260,7 +302,7 @@ function renderSelected(selected, payload) {
   elements.updatedAt.textContent = selected.lastUpdatedAt ? window.t("updateAt", { t: formatDateTime(selected.lastUpdatedAt) }) : window.t("waitingUpdate");
 
   renderResources(payload, selected);
-  renderTps(selected.tps);
+  renderTps(selected.tps, selected.mspt);
   renderPlayers(players, selected.tracking, selected.server.playersOnline || 0);
   renderBackfill(selected);
   renderLeaderboard(selected, players);
@@ -313,15 +355,27 @@ function renderResources(payload, selected) {
   elements.processList.replaceChildren(...items);
 }
 
-function renderTps(tps) {
-  if (!tps || !tps.ok) {
+function renderTps(tps, mspt) {
+  const tpsOk = tps && tps.ok;
+  const msptOk = mspt && mspt.ok;
+  if (!tpsOk && !msptOk) {
     elements.tpsLine.textContent = "";
-    elements.tpsLine.classList.remove("show");
+    elements.tpsLine.classList.remove("show", "warn", "hot");
     return;
   }
   elements.tpsLine.classList.add("show");
   const fmt = (n) => Number.isFinite(n) ? n.toFixed(1) : "--";
-  elements.tpsLine.textContent = `${window.t("tps")} 1m ${fmt(tps.tps1m)} · 5m ${fmt(tps.tps5m)} · 15m ${fmt(tps.tps15m)}`;
+  const parts = [];
+  if (tpsOk) {
+    parts.push(`${window.t("tps")} 1m ${fmt(tps.tps1m)} · 5m ${fmt(tps.tps5m)} · 15m ${fmt(tps.tps15m)}`);
+  }
+  if (msptOk) {
+    parts.push(`MSPT ${fmt(mspt.avg)}${Number.isFinite(mspt.peak) ? ` (peak ${fmt(mspt.peak)})` : ""}`);
+  }
+  elements.tpsLine.textContent = parts.join(" · ");
+  // Red below 10, yellow below 18; relative to TPS only.
+  elements.tpsLine.classList.toggle("hot", tpsOk && Number.isFinite(tps.tps1m) && tps.tps1m < 10);
+  elements.tpsLine.classList.toggle("warn", tpsOk && Number.isFinite(tps.tps1m) && tps.tps1m >= 10 && tps.tps1m < 18);
 }
 
 function renderBackfill(selected) {
@@ -389,16 +443,26 @@ function renderPlayers(players, tracking, reportedCount) {
 
   if (!players.online.length) {
     const message = reportedCount > 0 ? window.t("serverHasPlayersNoNames") : window.t("noOnline");
-    elements.onlinePlayersTable.replaceChildren(rowSpan(4, message));
+    elements.onlinePlayersTable.replaceChildren(rowSpan(5, message));
     return;
   }
 
-  elements.onlinePlayersTable.replaceChildren(...players.online.map((player) => el("tr", "",
-    el("td", "", el("span", "player-name", document.createTextNode(player.name))),
-    el("td", "", document.createTextNode(formatDuration(player.currentSessionMs))),
-    el("td", "", document.createTextNode(formatDuration(player.totalMs))),
-    el("td", "", document.createTextNode(String(player.sessions)))
-  )));
+  // Build a name → ping lookup from RCON spark output (when available).
+  const pingMap = new Map();
+  if (selected && selected.pings && selected.pings.ok && Array.isArray(selected.pings.players)) {
+    for (const item of selected.pings.players) pingMap.set(String(item.name).toLowerCase(), item.ms);
+  }
+
+  elements.onlinePlayersTable.replaceChildren(...players.online.map((player) => {
+    const ping = pingMap.get(String(player.name).toLowerCase());
+    return el("tr", "",
+      el("td", "", el("span", "player-name", document.createTextNode(player.name))),
+      el("td", "", document.createTextNode(Number.isFinite(ping) ? `${ping} ms` : "—")),
+      el("td", "", document.createTextNode(formatDuration(player.currentSessionMs))),
+      el("td", "", document.createTextNode(formatDuration(player.totalMs))),
+      el("td", "", document.createTextNode(String(player.sessions)))
+    );
+  }));
 }
 
 function renderLeaderboard(selected, players) {

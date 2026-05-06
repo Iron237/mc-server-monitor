@@ -162,6 +162,8 @@ function loadAppConfig(rootDir) {
     sseEnabled: envBool("SSE_ENABLED", true),
     staleSessionMultiplier: Math.max(2, envInt("STALE_SESSION_POLL_MULTIPLIER", 4)),
     rconTimeoutMs: envInt("RCON_TIMEOUT_MS", 3000),
+    alertTpsThreshold: Math.max(0.1, envInt("ALERT_TPS_THRESHOLD", 10)),
+    alertTpsDurationMs: Math.max(30_000, envInt("ALERT_TPS_DURATION_MS", 5 * 60 * 1000)),
     serversSource: resolveServersFile(rootDir) || (envString("SERVERS", "") ? "SERVERS env" : "single-server env"),
     servers: loadServerConfigs(rootDir)
   };
