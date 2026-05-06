@@ -131,9 +131,12 @@ function parsePingLines(text) {
   return [...seen.values()].sort((a, b) => a.ms - b.ms);
 }
 
+// `neoforge tps` first because NeoForge dropped the `forge` namespace.
+// `forge tps` still works on classic Forge servers.
+const TPS_CANDIDATES = ["neoforge tps", "forge tps", "tps", "spark tps"];
+
 async function readServerTps(rconConfig) {
-  const candidates = ["forge tps", "tps", "spark tps"];
-  for (const cmd of candidates) {
+  for (const cmd of TPS_CANDIDATES) {
     const result = await rconCommand(rconConfig, cmd);
     if (!result.ok) continue;
     const parsed = parseTpsLine(result.body);
@@ -142,29 +145,60 @@ async function readServerTps(rconConfig) {
   return { ok: false, error: "No supported TPS command responded" };
 }
 
-// Per-dimension TPS / entity-count from `forge tps` output:
-//   "Dim 0 (minecraft:overworld): Mean tick time: 5.21 ms. Mean TPS: 19.92"
-//   "Dim minecraft:overworld: Mean tick time: 5.21 ms. Mean TPS: 19.92. Loaded chunks: 441. Entities: 84"
-// We capture every "Dim ..." line, plus optional chunks / entities suffixes.
+// Per-dimension TPS / entity-count from `forge tps` / `neoforge tps`. Three
+// known shapes:
+//
+//   classic Forge:   Dim 0 (minecraft:overworld): Mean tick time: 5.21 ms. Mean TPS: 19.92
+//   newer Forge:     Dim minecraft:overworld: Mean tick time: 5.21 ms. Mean TPS: 19.92. Loaded chunks: 441. Entities: 84
+//   NeoForge 1.21+:  minecraft:overworld: Mean tick time: 5.21 ms. Mean TPS: 19.92.
+//
+// We split into lines and accept any line that contains both "Mean tick time"
+// and "Mean TPS", excluding the synthetic "Overall:" summary line.
 function parseDimensionStats(text) {
   if (!text) return [];
   const stripped = stripFormatting(text);
   const out = [];
-  const lineRe = /Dim(?:ension)?\s*(?:(-?\d+)\s*)?\(?([A-Za-z][A-Za-z0-9_:.\-]*)?\)?\s*:?\s*Mean tick time:\s*(\d+\.\d+)\s*ms.*?Mean TPS:\s*(\d+\.\d+)([^\n]*)/gi;
-  let m;
-  while ((m = lineRe.exec(stripped)) !== null) {
-    const numericId = m[1] !== undefined ? Number(m[1]) : null;
-    const name = (m[2] || (numericId !== null ? `dim_${numericId}` : "unknown")).trim();
-    const mspt = Number(m[3]);
-    const tps = Number(m[4]);
-    const tail = m[5] || "";
-    const entityMatch = tail.match(/Entities?\s*:\s*(\d+)/i) || tail.match(/(\d+)\s*entities/i);
-    const chunkMatch = tail.match(/Loaded\s+chunks?\s*:\s*(\d+)/i) || tail.match(/(\d+)\s*chunks/i);
+  for (const rawLine of stripped.split(/\r?\n/)) {
+    if (!/Mean tick time/i.test(rawLine) || !/Mean TPS/i.test(rawLine)) continue;
+    if (/^\s*Overall\b/i.test(rawLine)) continue;
+
+    let id = null;
+    let name = null;
+
+    // Try classic Forge: "Dim N (namespace:path): ..."
+    let m = rawLine.match(/Dim(?:ension)?\s+(-?\d+)\s*\(([A-Za-z][\w:.\-]*?)\)/i);
+    if (m) { id = Number(m[1]); name = m[2]; }
+
+    // Older with bare numeric id only: "Dim 0: Mean tick time: ..."
+    if (!name) {
+      m = rawLine.match(/^\s*Dim(?:ension)?\s+(-?\d+)\s*:/i);
+      if (m) { id = Number(m[1]); name = `dim_${id}`; }
+    }
+
+    // Forge with namespace but no numeric id: "Dim minecraft:overworld: ..."
+    if (!name) {
+      m = rawLine.match(/^\s*Dim(?:ension)?\s+([A-Za-z][\w]*:[A-Za-z][\w.\-]*)\s*:/i);
+      if (m) name = m[1];
+    }
+
+    // NeoForge 1.21+: bare "minecraft:overworld: Mean tick time: ..."
+    if (!name) {
+      m = rawLine.match(/^\s*([A-Za-z][\w]*:[A-Za-z][\w.\-]*)\s*:\s*Mean tick time/i);
+      if (m) name = m[1];
+    }
+
+    if (!name) continue;
+
+    const msptMatch = rawLine.match(/Mean tick time:\s*(\d+\.?\d*)\s*ms/i);
+    const tpsMatch = rawLine.match(/Mean TPS:\s*(\d+\.?\d*)/i);
+    const entityMatch = rawLine.match(/Entities?\s*:\s*(\d+)/i) || rawLine.match(/(\d+)\s*entities\b/i);
+    const chunkMatch = rawLine.match(/Loaded\s+chunks?\s*:\s*(\d+)/i) || rawLine.match(/(\d+)\s*chunks\b/i);
+
     out.push({
-      id: numericId,
+      id,
       name,
-      mspt: Number.isFinite(mspt) ? mspt : null,
-      tps: Number.isFinite(tps) ? tps : null,
+      mspt: msptMatch ? Number(msptMatch[1]) : null,
+      tps: tpsMatch ? Number(tpsMatch[1]) : null,
       entities: entityMatch ? Number(entityMatch[1]) : null,
       loadedChunks: chunkMatch ? Number(chunkMatch[1]) : null
     });
@@ -173,12 +207,11 @@ function parseDimensionStats(text) {
 }
 
 async function readDimensionStats(rconConfig) {
-  const candidates = ["forge tps", "tps"];
-  for (const cmd of candidates) {
+  for (const cmd of TPS_CANDIDATES) {
     const result = await rconCommand(rconConfig, cmd);
     if (!result.ok) continue;
     const dims = parseDimensionStats(result.body);
-    if (dims.length > 0) return { ok: true, command: cmd, dimensions: dims };
+    if (dims.length > 0) return { ok: true, command: cmd, dimensions: dims, raw: stripFormatting(result.body) };
   }
   return { ok: false, error: "No per-dimension data in TPS output", dimensions: [] };
 }
@@ -213,14 +246,20 @@ async function readServerHealth(rconConfig) {
     readServerMspt(rconConfig),
     readServerPings(rconConfig)
   ]);
-  // The forge-style TPS reply already contains per-dimension data, so reuse
-  // the raw body when present and only re-issue the command otherwise.
+  // Try to reuse the TPS reply for dimension data first (so we don't
+  // double-issue the same RCON command). If that yields nothing — typically
+  // when `spark tps` won the race and gave only the overall figure — fall
+  // back to a dedicated probe through the full TPS_CANDIDATES list.
   let dimensions = { ok: false, dimensions: [] };
-  if (tps && tps.ok && tps.raw && /Dim/i.test(tps.raw)) {
+  if (tps && tps.ok && tps.raw) {
     const dims = parseDimensionStats(tps.raw);
-    if (dims.length > 0) dimensions = { ok: true, command: tps.command, dimensions: dims };
-  } else {
-    dimensions = await readDimensionStats(rconConfig);
+    if (dims.length > 0) {
+      dimensions = { ok: true, command: tps.command, dimensions: dims, raw: tps.raw };
+    }
+  }
+  if (!dimensions.ok) {
+    const probed = await readDimensionStats(rconConfig);
+    if (probed.ok || probed.raw) dimensions = probed;
   }
   return { tps, mspt, pings, dimensions };
 }
