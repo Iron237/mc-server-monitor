@@ -249,6 +249,10 @@ function parseUnixProcessRows(stdout) {
   });
 }
 
+// PIDs accumulate forever otherwise — Java restarts get new PIDs every time.
+// Drop entries we haven't seen in 10 minutes so the Map stays bounded.
+const PROCESS_SAMPLE_TTL_MS = 10 * 60 * 1000;
+
 function normalizeProcessSample(sample) {
   const now = Date.now();
   const previous = previousProcessSamples.get(sample.pid);
@@ -262,6 +266,12 @@ function normalizeProcessSample(sample) {
   }
   if (Number.isFinite(sample.cpuSeconds)) {
     previousProcessSamples.set(sample.pid, { cpuSeconds: sample.cpuSeconds, sampledAt: now });
+  }
+  // Cheap periodic GC of stale PIDs.
+  if (previousProcessSamples.size > 64) {
+    for (const [pid, entry] of previousProcessSamples) {
+      if (now - entry.sampledAt > PROCESS_SAMPLE_TTL_MS) previousProcessSamples.delete(pid);
+    }
   }
   return {
     pid: sample.pid,

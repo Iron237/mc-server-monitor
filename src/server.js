@@ -183,11 +183,20 @@ const server = http.createServer(async (request, response) => {
       return;
     }
     if (parsed.pathname === "/health") {
+      const mem = process.memoryUsage();
       sendJson(response, 200, {
         ok: true,
         onlineServers: state.servers.filter((item) => item.server.online).length,
         servers: state.servers.length,
-        sseClients: sseHub.size()
+        sseClients: sseHub.size(),
+        uptimeSec: Math.round(process.uptime()),
+        memory: {
+          rssMB:        Math.round(mem.rss / 1024 / 1024),
+          heapUsedMB:   Math.round(mem.heapUsed / 1024 / 1024),
+          heapTotalMB:  Math.round(mem.heapTotal / 1024 / 1024),
+          externalMB:   Math.round(mem.external / 1024 / 1024),
+          arrayBuffersMB: Math.round((mem.arrayBuffers || 0) / 1024 / 1024)
+        }
       });
       return;
     }
