@@ -11,6 +11,8 @@ const { pingMinecraftServer } = require("./lib/mcProtocol");
 const { queryMinecraftServer } = require("./lib/mcQuery");
 const { readServerHealth } = require("./lib/rcon");
 const { createAlertEngine } = require("./lib/alerts");
+const { createWebhookDispatcher } = require("./lib/webhooks");
+const { createWorldSizeSampler } = require("./lib/worldSize");
 const { collectSystemResources, collectAllServerProcesses } = require("./lib/processMon");
 const { importLogBackfill } = require("./lib/logBackfill");
 const {
@@ -32,9 +34,17 @@ const publicDir = path.join(rootDir, "public");
 const statsPath = path.join(config.dataDir, "player-stats.json");
 const startTime = Date.now();
 const sseHub = createSseHub();
+const webhooks = createWebhookDispatcher({
+  targets: config.webhooks || [],
+  timeoutMs: config.webhookTimeoutMs
+});
 const alertEngine = createAlertEngine({
   tpsThreshold: config.alertTpsThreshold,
   sustainedMs: config.alertTpsDurationMs
+});
+const worldSizes = createWorldSizeSampler({
+  intervalMs: config.worldSizeIntervalMs,
+  historyLimit: config.worldSizeHistoryLimit
 });
 
 const state = {
@@ -247,8 +257,32 @@ async function pollNow() {
 async function pollServer(serverState, now, processes) {
   const serverConfig = findServerConfig(serverState.id);
   try {
+    const wasOnline = serverState.server.online;
     const statusResult = await pingMinecraftServer(serverConfig, { timeoutMs: config.pingTimeoutMs });
     applyStatusResult(serverState, statusResult, now);
+    // Fire one webhook on each online↔offline edge. The very first poll has
+    // wasOnline=false because state starts in "starting"; we suppress that
+    // bootstrap transition by requiring a previous successful poll.
+    if (serverState.connection.lastSuccessAt || serverState.connection.lastFailureAt) {
+      if (!wasOnline && statusResult.online) {
+        webhooks.dispatch({
+          type: "server-online",
+          kind: "server-online",
+          serverId: serverState.id,
+          serverName: serverState.name,
+          at: new Date(now).toISOString()
+        }).catch(() => {});
+      } else if (wasOnline && !statusResult.online) {
+        webhooks.dispatch({
+          type: "server-offline",
+          kind: "server-offline",
+          serverId: serverState.id,
+          serverName: serverState.name,
+          error: statusResult.error,
+          at: new Date(now).toISOString()
+        }).catch(() => {});
+      }
+    }
 
     let queryResult = null;
     if (serverConfig.queryEnabled && statusResult.online) {
@@ -280,10 +314,12 @@ async function pollServer(serverState, now, processes) {
       serverState.tps = health.tps;
       serverState.mspt = health.mspt;
       serverState.pings = health.pings;
+      serverState.dimensions = health.dimensions;
     } else {
       serverState.tps = { ok: false, error: serverConfig.rconEnabled ? "RCON not configured" : null };
       serverState.mspt = { ok: false, error: null };
       serverState.pings = { ok: false, error: null, players: [] };
+      serverState.dimensions = { ok: false, error: null, dimensions: [] };
     }
 
     const tpsValue = serverState.tps && serverState.tps.ok ? serverState.tps.tps1m : null;
@@ -293,8 +329,24 @@ async function pollServer(serverState, now, processes) {
       sseHub.broadcast("alert", alertEvent);
       const tag = alertEvent.type === "tps-low" ? "ALERT" : "RECOVERED";
       console.warn(`[${tag}] ${serverState.id} tps=${alertEvent.currentTps ?? alertEvent.recoveredTps} threshold=${alertEvent.threshold} duration=${Math.round(alertEvent.durationMs / 1000)}s`);
+      // Fan-out to webhooks (Discord / Server酱 / 企业微信 / WxPusher / …).
+      // We only annotate `serverName` so adapters can surface a friendly title.
+      webhooks.dispatch({ ...alertEvent, serverName: serverState.name }).catch(() => {});
     }
     serverState.activeIncident = alertEngine.getIncident(serverState.id);
+
+    // World-size sampler runs on its own cadence (default 1h). Skipped polls
+    // just return the latest cached sample so the API payload stays populated.
+    if (serverConfig.worldPath) {
+      worldSizes.sample(serverState.id, serverConfig.worldPath, now).catch(() => {});
+      serverState.worldSize = {
+        history: worldSizes.getHistory(serverState.id),
+        latest: worldSizes.getLatest(serverState.id),
+        projection: worldSizes.projectGrowth(serverState.id)
+      };
+    } else {
+      serverState.worldSize = { history: [], latest: null, projection: null };
+    }
 
     const observed = chooseObservedPlayers(serverState, statusResult, queryResult);
     const stats = ensureServerStats(playerStats, serverState.id);
@@ -409,6 +461,9 @@ function hydratePersistedState(now) {
     if (playerStats.history && Array.isArray(playerStats.history[serverState.id])) {
       serverState.history = playerStats.history[serverState.id].slice(-config.historyLimit);
     }
+    if (playerStats.worldSizes && Array.isArray(playerStats.worldSizes[serverState.id])) {
+      worldSizes.loadHistory(serverState.id, playerStats.worldSizes[serverState.id]);
+    }
   }
 }
 
@@ -431,6 +486,14 @@ function addHistoryPoint(serverState, now) {
   }
   if (!playerStats.history) playerStats.history = {};
   playerStats.history[serverState.id] = serverState.history.slice(-config.historyLimit);
+
+  // Persist world-size samples too — much smaller than tick history but
+  // valuable across restarts because samples only happen hourly.
+  const worldHistory = worldSizes.getHistory(serverState.id);
+  if (worldHistory.length) {
+    if (!playerStats.worldSizes) playerStats.worldSizes = {};
+    playerStats.worldSizes[serverState.id] = worldHistory.slice(-config.worldSizeHistoryLimit);
+  }
 }
 
 function buildStatusPayload() {
@@ -537,6 +600,8 @@ function createServerState(serverConfig) {
     tps: { ok: false, error: null },
     mspt: { ok: false, error: null },
     pings: { ok: false, error: null, players: [] },
+    dimensions: { ok: false, error: null, dimensions: [] },
+    worldSize: { history: [], latest: null, projection: null },
     alerts: [],
     activeIncident: null,
     tracking: {

@@ -84,6 +84,45 @@ function resolveServersFile(rootDir) {
   return null;
 }
 
+function loadWebhookTargets(rootDir) {
+  const base = rootDir || process.cwd();
+  const explicit = envString("WEBHOOKS_FILE", "");
+  if (explicit) {
+    const full = path.resolve(base, explicit);
+    if (!fs.existsSync(full)) {
+      throw new Error(`WEBHOOKS_FILE points to ${full} but the file does not exist.`);
+    }
+    return parseWebhooksFile(full);
+  }
+  for (const name of ["webhooks.jsonc", "webhooks.json"]) {
+    const full = path.resolve(base, name);
+    if (fs.existsSync(full)) return parseWebhooksFile(full);
+  }
+  const raw = envString("WEBHOOKS", "");
+  if (raw) {
+    try {
+      const parsed = JSON.parse(raw);
+      if (!Array.isArray(parsed)) throw new Error("WEBHOOKS must be a JSON array");
+      return parsed;
+    } catch (error) {
+      throw new Error(`Invalid WEBHOOKS env: ${error.message}`);
+    }
+  }
+  return [];
+}
+
+function parseWebhooksFile(filePath) {
+  let data;
+  try {
+    data = loadJsoncFile(filePath);
+  } catch (error) {
+    throw new Error(`Failed to parse ${filePath}: ${error.message}`);
+  }
+  const list = Array.isArray(data) ? data : data && Array.isArray(data.targets) ? data.targets : null;
+  if (!list) throw new Error(`${filePath} must be an array (or {"targets": [...]}).`);
+  return list;
+}
+
 function loadServerConfigs(rootDir) {
   const fromFile = resolveServersFile(rootDir);
   if (fromFile) return parseServersFile(fromFile);
@@ -164,6 +203,10 @@ function loadAppConfig(rootDir) {
     rconTimeoutMs: envInt("RCON_TIMEOUT_MS", 3000),
     alertTpsThreshold: Math.max(0.1, envInt("ALERT_TPS_THRESHOLD", 10)),
     alertTpsDurationMs: Math.max(30_000, envInt("ALERT_TPS_DURATION_MS", 5 * 60 * 1000)),
+    worldSizeIntervalMs: Math.max(60_000, envInt("WORLD_SIZE_INTERVAL_MS", 60 * 60 * 1000)),
+    worldSizeHistoryLimit: Math.max(24, envInt("WORLD_SIZE_HISTORY_LIMIT", 720)),
+    webhookTimeoutMs: envInt("WEBHOOK_TIMEOUT_MS", 5000),
+    webhooks: loadWebhookTargets(rootDir),
     serversSource: resolveServersFile(rootDir) || (envString("SERVERS", "") ? "SERVERS env" : "single-server env"),
     servers: loadServerConfigs(rootDir)
   };

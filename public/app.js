@@ -40,6 +40,13 @@ const elements = {
   deathPanel: $("#deathPanel"),
   deathLine: $("#deathLine"),
   deathLeaderboard: $("#deathLeaderboard"),
+  dimensionsPanel: $("#dimensionsPanel"),
+  dimensionsLine: $("#dimensionsLine"),
+  dimensionGrid: $("#dimensionGrid"),
+  worldSizePanel: $("#worldSizePanel"),
+  worldSizeLine: $("#worldSizeLine"),
+  worldSizeChart: $("#worldSizeChart"),
+  worldSizeProjection: $("#worldSizeProjection"),
   historyChart: $("#historyChart"),
   alertBanner: $("#alertBanner")
 };
@@ -307,6 +314,8 @@ function renderSelected(selected, payload) {
   renderBackfill(selected);
   renderLeaderboard(selected, players);
   renderDeathLeaderboard(selected, players);
+  renderDimensions(selected);
+  renderWorldSize(selected);
   drawHistory(selected.history || []);
 
   elements.hostLine.textContent = system.hostname
@@ -486,6 +495,157 @@ function renderLeaderboard(selected, players) {
       window.t("lastSeenLabel") + " " + formatLastSeen(player.lastSeenAt)
     ))
   )));
+}
+
+function renderDimensions(selected) {
+  if (!elements.dimensionsPanel) return;
+  const dims = selected && selected.dimensions && selected.dimensions.ok
+    ? selected.dimensions.dimensions
+    : null;
+  if (!dims || !dims.length) {
+    elements.dimensionsPanel.style.display = "none";
+    return;
+  }
+  elements.dimensionsPanel.style.display = "";
+  // Sort: load (mspt) descending, so the laggiest dimension reads first.
+  const sorted = [...dims].sort((a, b) => (b.mspt || 0) - (a.mspt || 0));
+  const totalEntities = sorted.reduce((s, d) => s + (d.entities || 0), 0);
+  const totalChunks = sorted.reduce((s, d) => s + (d.loadedChunks || 0), 0);
+  if (elements.dimensionsLine) {
+    elements.dimensionsLine.textContent = window.t("dimensionsSummary", {
+      n: sorted.length,
+      entities: totalEntities,
+      chunks: totalChunks
+    });
+  }
+
+  // Per-dimension card. Bar widths use mspt vs 50ms target so a healthy
+  // dimension (5ms) fills 10%, a 25ms one fills 50%, anything ≥50ms saturates red.
+  const target = 50;
+  elements.dimensionGrid.replaceChildren(...sorted.map((dim) => {
+    const msptPct = Number.isFinite(dim.mspt) ? Math.min(100, (dim.mspt / target) * 100) : 0;
+    const barClass = msptPct >= 80 ? "hot" : msptPct >= 50 ? "warn" : "";
+    const fmt = (n) => Number.isFinite(n) ? n.toFixed(1) : "--";
+    return el("div", "dim-card",
+      el("div", "dim-name", document.createTextNode(stripDimNamespace(dim.name))),
+      el("div", "dim-meta", document.createTextNode(
+        `TPS ${fmt(dim.tps)} · MSPT ${fmt(dim.mspt)}ms`
+      )),
+      el("div", "bar",
+        Object.assign(document.createElement("span"), {
+          className: barClass,
+          style: `width:${msptPct}%`
+        })
+      ),
+      el("div", "dim-counts", document.createTextNode(
+        (Number.isFinite(dim.entities) ? window.t("entitiesCount", { n: dim.entities }) : "—")
+        + "  ·  "
+        + (Number.isFinite(dim.loadedChunks) ? window.t("chunksCount", { n: dim.loadedChunks }) : "—")
+      ))
+    );
+  }));
+}
+
+function stripDimNamespace(name) {
+  // "minecraft:overworld" → "overworld"; "twilightforest:twilight_forest" stays.
+  if (typeof name !== "string") return String(name || "");
+  if (name.startsWith("minecraft:")) return name.slice(10);
+  return name;
+}
+
+function renderWorldSize(selected) {
+  if (!elements.worldSizePanel) return;
+  const ws = selected && selected.worldSize;
+  const history = (ws && ws.history) || [];
+  if (!ws || !history.length) {
+    elements.worldSizePanel.style.display = "none";
+    return;
+  }
+  elements.worldSizePanel.style.display = "";
+  const latest = history[history.length - 1];
+  const earliest = history[0];
+  const sizeNow = formatBytes(latest.bytes || 0);
+  if (elements.worldSizeLine) {
+    elements.worldSizeLine.textContent = window.t("worldSizeSummary", {
+      size: sizeNow,
+      samples: history.length,
+      since: formatDateTime(earliest.at)
+    });
+  }
+  drawWorldSizeChart(history);
+  // Projection line — only useful with at least a few hours of samples.
+  if (elements.worldSizeProjection) {
+    const proj = ws.projection;
+    if (proj && Number.isFinite(proj.bytesPerDay) && proj.bytesPerDay > 0) {
+      const perDay = formatBytes(proj.bytesPerDay);
+      const days = Number.isFinite(proj.daysUntilFull) && proj.daysUntilFull > 0
+        ? window.t("worldDaysUntilFull", { d: proj.daysUntilFull.toFixed(1) })
+        : "";
+      elements.worldSizeProjection.textContent = window.t("worldGrowthRate", { per: perDay }) + (days ? "  ·  " + days : "");
+    } else {
+      elements.worldSizeProjection.textContent = window.t("worldNotEnoughSamples");
+    }
+  }
+}
+
+function drawWorldSizeChart(history) {
+  const canvas = elements.worldSizeChart;
+  if (!canvas) return;
+  const ratio = window.devicePixelRatio || 1;
+  const width = canvas.clientWidth;
+  const height = canvas.clientHeight || 120;
+  canvas.width = Math.floor(width * ratio);
+  canvas.height = Math.floor(height * ratio);
+  const ctx = canvas.getContext("2d");
+  ctx.setTransform(ratio, 0, 0, ratio, 0, 0);
+  ctx.clearRect(0, 0, width, height);
+
+  const styles = getComputedStyle(document.documentElement);
+  const lineColor = styles.getPropertyValue("--line").trim() || "#dbe3df";
+  const blue = styles.getPropertyValue("--blue").trim() || "#2864b4";
+
+  const padding = { left: 8, right: 8, top: 12, bottom: 18 };
+  const plotW = width - padding.left - padding.right;
+  const plotH = height - padding.top - padding.bottom;
+
+  // Single-line area chart of bytes over time.
+  const points = history.filter((p) => Number.isFinite(p.bytes));
+  if (points.length < 2) return;
+  const minTs = new Date(points[0].at).getTime();
+  const maxTs = new Date(points[points.length - 1].at).getTime();
+  const minBytes = Math.min(...points.map((p) => p.bytes));
+  const maxBytes = Math.max(...points.map((p) => p.bytes));
+  const span = Math.max(1, maxBytes - minBytes);
+  const xFor = (ts) => padding.left + ((ts - minTs) / Math.max(1, maxTs - minTs)) * plotW;
+  const yFor = (bytes) => padding.top + plotH - ((bytes - minBytes) / span) * plotH;
+
+  // Baseline grid
+  ctx.strokeStyle = lineColor;
+  ctx.lineWidth = 1;
+  ctx.beginPath();
+  ctx.moveTo(padding.left, padding.top + plotH);
+  ctx.lineTo(padding.left + plotW, padding.top + plotH);
+  ctx.stroke();
+
+  // Filled area under curve
+  ctx.beginPath();
+  ctx.moveTo(xFor(new Date(points[0].at).getTime()), padding.top + plotH);
+  for (const p of points) ctx.lineTo(xFor(new Date(p.at).getTime()), yFor(p.bytes));
+  ctx.lineTo(xFor(new Date(points[points.length - 1].at).getTime()), padding.top + plotH);
+  ctx.closePath();
+  ctx.fillStyle = blue + "22";
+  ctx.fill();
+
+  // Line on top
+  ctx.beginPath();
+  for (let i = 0; i < points.length; i += 1) {
+    const x = xFor(new Date(points[i].at).getTime());
+    const y = yFor(points[i].bytes);
+    if (i === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y);
+  }
+  ctx.strokeStyle = blue;
+  ctx.lineWidth = 2;
+  ctx.stroke();
 }
 
 function renderDeathLeaderboard(selected, players) {

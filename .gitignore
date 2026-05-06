@@ -3,6 +3,9 @@ node_modules/
 servers.json
 servers.jsonc
 !servers.example.jsonc
+webhooks.json
+webhooks.jsonc
+!webhooks.example.jsonc
 data/*.json
 *.log
 .DS_Store

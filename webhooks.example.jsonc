@@ -1,0 +1,103 @@
+// Webhook 通知配置 —— 把告警 / 上下线事件推到 Discord / 微信 / 企业微信 / 邮件等通道
+//
+// 用法：
+//   1. 复制为 webhooks.jsonc：cp webhooks.example.jsonc webhooks.jsonc
+//   2. 删掉你不用的项，填上需要的 token / URL
+//   3. 重启监控
+//
+// 也支持在 .env 里自定义路径：WEBHOOKS_FILE=webhooks.jsonc
+//
+// 事件类型（events 字段过滤；省略 events 字段表示订阅全部）：
+//   - tps-low          TPS 持续低于阈值（默认 5min < 10）
+//   - tps-recovered    TPS 恢复
+//   - server-online    服务器上线
+//   - server-offline   服务器下线
+//   - crash            （后续支持）检测到崩溃
+//
+// 调试：先在 PowerShell 里手动 POST 一遍验证 token 通了再放进来。
+[
+  // ─────────── 1. 微信公众号推送：Server酱 Turbo（最简单，免费 5/天）───────────
+  // 注册 https://sct.ftqq.com 拿到 SCKEY，URL 形如：
+  //   https://sctapi.ftqq.com/SCT123456TXXXXXXXXX.send
+  {
+    "name": "我的微信",
+    "type": "serverchan",
+    "url": "https://sctapi.ftqq.com/REPLACE_WITH_YOUR_SCKEY.send",
+    "events": ["tps-low", "tps-recovered", "server-offline"]
+  },
+
+  // ─────────── 2. 微信推送：PushPlus（无次数限制、支持模板）───────────
+  // 注册 https://www.pushplus.plus 拿到 token
+  {
+    "name": "PushPlus",
+    "type": "pushplus",
+    "url": "https://www.pushplus.plus/send",
+    "token": "REPLACE_WITH_YOUR_TOKEN",
+    "options": {
+      "template": "markdown"
+      // 想发到群组：把 topic 加到 options.extra：
+      // "extra": { "topic": "your-group-topic" }
+    },
+    "events": ["tps-low", "server-offline"]
+  },
+
+  // ─────────── 3. 企业微信群机器人（团队最常用）───────────
+  // 在企业微信群里 → 群设置 → 群机器人 → 添加 → 复制 webhook URL
+  {
+    "name": "企业微信运维群",
+    "type": "generic",
+    "url": "https://qyapi.weixin.qq.com/cgi-bin/webhook/send?key=REPLACE_WITH_YOUR_KEY",
+    "options": {
+      "extra": {
+        "msgtype": "markdown",
+        "markdown": { "content": "{{event 会被 generic 包成 event 字段，企业微信用这个不太合适}}" }
+      }
+    },
+    "events": []
+    // 注意：generic 是把事件 JSON 直接 POST，企业微信需要特定格式。
+    // 想用企业微信群机器人，推荐另起一个中转脚本（n8n / 自己写个 endpoint）
+    // 把我们的 event JSON 转成企业微信要的 markdown 格式。
+    // 或者直接用上面的 serverchan / pushplus（更简单）。
+  },
+
+  // ─────────── 4. WxPusher（微信公众号 + App 双通道）───────────
+  // 注册 https://wxpusher.zjiecode.com 拿到 appToken
+  {
+    "name": "WxPusher",
+    "type": "wxpusher",
+    "url": "https://wxpusher.zjiecode.com/api/send/message",
+    "token": "REPLACE_WITH_YOUR_APP_TOKEN",
+    "options": {
+      "topicIds": [12345]
+      // 或者用 uids: ["UID_xxx"] 推给指定订阅者
+    },
+    "events": ["tps-low", "tps-recovered", "server-online", "server-offline"]
+  },
+
+  // ─────────── 5. Discord ───────────
+  // 服务器设置 → 整合 → Webhook → 复制 URL
+  {
+    "name": "Discord #ops",
+    "type": "discord",
+    "url": "https://discord.com/api/webhooks/REPLACE_ID/REPLACE_TOKEN",
+    "options": { "username": "MC Monitor" }
+  },
+
+  // ─────────── 6. Slack incoming webhook ───────────
+  {
+    "name": "Slack #mc",
+    "type": "slack",
+    "url": "https://hooks.slack.com/services/REPLACE/WITH/YOUR_TOKEN"
+  },
+
+  // ─────────── 7. 通用 JSON POST（自己写中转，n8n / IFTTT / Bark / …）───────────
+  {
+    "name": "self-hosted",
+    "type": "generic",
+    "url": "https://your-endpoint.example/mc-events",
+    "options": {
+      "method": "POST",
+      "headers": { "X-Auth": "your-secret" }
+    }
+  },
+]

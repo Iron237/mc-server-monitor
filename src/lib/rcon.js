@@ -137,9 +137,50 @@ async function readServerTps(rconConfig) {
     const result = await rconCommand(rconConfig, cmd);
     if (!result.ok) continue;
     const parsed = parseTpsLine(result.body);
-    if (parsed) return { ok: true, command: cmd, ...parsed };
+    if (parsed) return { ok: true, command: cmd, raw: stripFormatting(result.body), ...parsed };
   }
   return { ok: false, error: "No supported TPS command responded" };
+}
+
+// Per-dimension TPS / entity-count from `forge tps` output:
+//   "Dim 0 (minecraft:overworld): Mean tick time: 5.21 ms. Mean TPS: 19.92"
+//   "Dim minecraft:overworld: Mean tick time: 5.21 ms. Mean TPS: 19.92. Loaded chunks: 441. Entities: 84"
+// We capture every "Dim ..." line, plus optional chunks / entities suffixes.
+function parseDimensionStats(text) {
+  if (!text) return [];
+  const stripped = stripFormatting(text);
+  const out = [];
+  const lineRe = /Dim(?:ension)?\s*(?:(-?\d+)\s*)?\(?([A-Za-z][A-Za-z0-9_:.\-]*)?\)?\s*:?\s*Mean tick time:\s*(\d+\.\d+)\s*ms.*?Mean TPS:\s*(\d+\.\d+)([^\n]*)/gi;
+  let m;
+  while ((m = lineRe.exec(stripped)) !== null) {
+    const numericId = m[1] !== undefined ? Number(m[1]) : null;
+    const name = (m[2] || (numericId !== null ? `dim_${numericId}` : "unknown")).trim();
+    const mspt = Number(m[3]);
+    const tps = Number(m[4]);
+    const tail = m[5] || "";
+    const entityMatch = tail.match(/Entities?\s*:\s*(\d+)/i) || tail.match(/(\d+)\s*entities/i);
+    const chunkMatch = tail.match(/Loaded\s+chunks?\s*:\s*(\d+)/i) || tail.match(/(\d+)\s*chunks/i);
+    out.push({
+      id: numericId,
+      name,
+      mspt: Number.isFinite(mspt) ? mspt : null,
+      tps: Number.isFinite(tps) ? tps : null,
+      entities: entityMatch ? Number(entityMatch[1]) : null,
+      loadedChunks: chunkMatch ? Number(chunkMatch[1]) : null
+    });
+  }
+  return out;
+}
+
+async function readDimensionStats(rconConfig) {
+  const candidates = ["forge tps", "tps"];
+  for (const cmd of candidates) {
+    const result = await rconCommand(rconConfig, cmd);
+    if (!result.ok) continue;
+    const dims = parseDimensionStats(result.body);
+    if (dims.length > 0) return { ok: true, command: cmd, dimensions: dims };
+  }
+  return { ok: false, error: "No per-dimension data in TPS output", dimensions: [] };
 }
 
 async function readServerMspt(rconConfig) {
@@ -172,7 +213,16 @@ async function readServerHealth(rconConfig) {
     readServerMspt(rconConfig),
     readServerPings(rconConfig)
   ]);
-  return { tps, mspt, pings };
+  // The forge-style TPS reply already contains per-dimension data, so reuse
+  // the raw body when present and only re-issue the command otherwise.
+  let dimensions = { ok: false, dimensions: [] };
+  if (tps && tps.ok && tps.raw && /Dim/i.test(tps.raw)) {
+    const dims = parseDimensionStats(tps.raw);
+    if (dims.length > 0) dimensions = { ok: true, command: tps.command, dimensions: dims };
+  } else {
+    dimensions = await readDimensionStats(rconConfig);
+  }
+  return { tps, mspt, pings, dimensions };
 }
 
 module.exports = {
@@ -181,7 +231,9 @@ module.exports = {
   readServerMspt,
   readServerPings,
   readServerHealth,
+  readDimensionStats,
   parseTpsLine,
   parseMsptLine,
-  parsePingLines
+  parsePingLines,
+  parseDimensionStats
 };

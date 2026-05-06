@@ -88,7 +88,16 @@ window.I18N = {
     deathCount: "{n} 次",
     lastDeathLabel: "最近",
     ping: "延迟",
-    tpsAlertBody: "TPS 已持续低于 {threshold} 共 {minutes} 分钟，最低 {lowest}"
+    tpsAlertBody: "TPS 已持续低于 {threshold} 共 {minutes} 分钟，最低 {lowest}",
+    dimensions: "维度负载",
+    dimensionsSummary: "{n} 个维度 · {entities} 个实体 · {chunks} 个加载区块",
+    entitiesCount: "{n} 实体",
+    chunksCount: "{n} 区块",
+    worldSize: "存档体积",
+    worldSizeSummary: "当前 {size} · {samples} 次采样自 {since}",
+    worldGrowthRate: "增长 {per}/天",
+    worldDaysUntilFull: "按当前速率 {d} 天后磁盘写满",
+    worldNotEnoughSamples: "需要更多采样才能给出增长预测"
   },
   en: {
     eyebrow: "Minecraft Monitor",
@@ -177,7 +186,16 @@ window.I18N = {
     deathCount: "{n}×",
     lastDeathLabel: "Last",
     ping: "Ping",
-    tpsAlertBody: "TPS below {threshold} for {minutes} min (lowest {lowest})"
+    tpsAlertBody: "TPS below {threshold} for {minutes} min (lowest {lowest})",
+    dimensions: "Dimensions",
+    dimensionsSummary: "{n} dims · {entities} entities · {chunks} loaded chunks",
+    entitiesCount: "{n} ent",
+    chunksCount: "{n} chk",
+    worldSize: "World Size",
+    worldSizeSummary: "{size} now · {samples} samples since {since}",
+    worldGrowthRate: "Growing {per}/day",
+    worldDaysUntilFull: "Disk full in ~{d} days at current rate",
+    worldNotEnoughSamples: "Need more samples for a growth projection"
   }
 };
 

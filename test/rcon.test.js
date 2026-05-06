@@ -3,7 +3,7 @@
 const test = require("node:test");
 const assert = require("node:assert/strict");
 
-const { parseTpsLine, parseMsptLine, parsePingLines } = require("../src/lib/rcon");
+const { parseTpsLine, parseMsptLine, parsePingLines, parseDimensionStats } = require("../src/lib/rcon");
 
 test("parseTpsLine reads forge-style format", () => {
   const line = "Dim 0 : Mean tick time: 12.345 ms. Mean TPS: 19.85";
@@ -58,4 +58,28 @@ test("parsePingLines extracts and dedups player pings", () => {
 test("parsePingLines tolerates colon vs dash separators", () => {
   assert.equal(parsePingLines("foo: 10ms").length, 1);
   assert.equal(parsePingLines("foo - 10 ms").length, 1);
+});
+
+test("parseDimensionStats reads forge-style per-dimension TPS lines", () => {
+  const text = [
+    "Overall: Mean tick time: 13.5 ms. Mean TPS: 19.8",
+    "Dim 0 (minecraft:overworld): Mean tick time: 5.21 ms. Mean TPS: 19.92. Loaded chunks: 441. Entities: 84",
+    "Dim minecraft:the_nether: Mean tick time: 1.10 ms. Mean TPS: 20.0. Loaded chunks: 41. Entities: 12",
+    "Dim 1 (minecraft:the_end): Mean tick time: 0.50 ms. Mean TPS: 20.0"
+  ].join("\n");
+  const dims = parseDimensionStats(text);
+  // Three "Dim …" lines (Overall is excluded by the prefix)
+  assert.equal(dims.length, 3);
+  assert.equal(dims[0].name, "minecraft:overworld");
+  assert.equal(dims[0].entities, 84);
+  assert.equal(dims[0].loadedChunks, 441);
+  assert.equal(dims[0].tps, 19.92);
+  assert.equal(dims[2].name, "minecraft:the_end");
+  // No entity / chunk suffix → those fields should be null, not undefined
+  assert.equal(dims[2].entities, null);
+});
+
+test("parseDimensionStats returns empty array when input lacks Dim lines", () => {
+  assert.deepEqual(parseDimensionStats("Mean tick time: 10 ms. Mean TPS: 20.0"), []);
+  assert.deepEqual(parseDimensionStats(""), []);
 });
