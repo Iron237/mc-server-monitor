@@ -85,6 +85,23 @@ function stripFormatting(text) {
 function parseTpsLine(text) {
   if (!text) return null;
   const stripped = stripFormatting(text);
+
+  // Modern Forge / NeoForge 1.21+ summary line:
+  //   "Overall: 20.000 TPS (5.265 ms/tick)"
+  // Use this as the authoritative source when present so we don't pick up
+  // the per-dimension figures by accident.
+  const overall = stripped.match(/Overall[^\n]*?(\d+\.?\d*)\s*TPS\s*\(\s*(\d+\.?\d*)\s*ms\/tick\s*\)/i);
+  if (overall) {
+    return {
+      tps1m: Number(overall[1]),
+      tps5m: null,
+      tps15m: null,
+      mspt: Number(overall[2]),
+      raw: stripped
+    };
+  }
+
+  // Vanilla / older Forge: just collect plausible decimals (≤ 30).
   const matches = [...stripped.matchAll(/(\d+\.\d+)/g)]
     .map((m) => Number(m[1]))
     .filter((n) => Number.isFinite(n) && n >= 0 && n <= 30);
@@ -159,29 +176,51 @@ function parseDimensionStats(text) {
   const stripped = stripFormatting(text);
   const out = [];
   for (const rawLine of stripped.split(/\r?\n/)) {
-    if (!/Mean tick time/i.test(rawLine) || !/Mean TPS/i.test(rawLine)) continue;
     if (/^\s*Overall\b/i.test(rawLine)) continue;
+
+    // Format A — NeoForge 1.21+ "/neoforge tps". The actual on-the-wire
+    // shape (verified against 1.21.1):
+    //   "Overworld: 20.000 TPS (4.819 ms/tick)"
+    //   "The Nether: 20.000 TPS (0.103 ms/tick)"
+    //   "Spatial Storage: 20.000 TPS (0.068 ms/tick)"
+    // Display name (not namespace), bracketed mspt, no entity/chunk counts.
+    let m = rawLine.match(/^\s*([A-Za-z][A-Za-z0-9_ .'\-]*?)\s*:\s*(\d+\.?\d*)\s*TPS\s*\(\s*(\d+\.?\d*)\s*ms\/tick\s*\)/i);
+    if (m) {
+      out.push({
+        id: null,
+        name: m[1].trim(),
+        tps: Number(m[2]),
+        mspt: Number(m[3]),
+        entities: null,
+        loadedChunks: null
+      });
+      continue;
+    }
+
+    // Formats B–E require both "Mean tick time" and "Mean TPS" tokens —
+    // classic Forge / older Forge / newer Forge / NeoForge namespace.
+    if (!/Mean tick time/i.test(rawLine) || !/Mean TPS/i.test(rawLine)) continue;
 
     let id = null;
     let name = null;
 
-    // Try classic Forge: "Dim N (namespace:path): ..."
-    let m = rawLine.match(/Dim(?:ension)?\s+(-?\d+)\s*\(([A-Za-z][\w:.\-]*?)\)/i);
+    // B. Classic Forge: "Dim N (namespace:path): ..."
+    m = rawLine.match(/Dim(?:ension)?\s+(-?\d+)\s*\(([A-Za-z][\w:.\-]*?)\)/i);
     if (m) { id = Number(m[1]); name = m[2]; }
 
-    // Older with bare numeric id only: "Dim 0: Mean tick time: ..."
+    // C. Numeric only: "Dim 0: ..."
     if (!name) {
       m = rawLine.match(/^\s*Dim(?:ension)?\s+(-?\d+)\s*:/i);
       if (m) { id = Number(m[1]); name = `dim_${id}`; }
     }
 
-    // Forge with namespace but no numeric id: "Dim minecraft:overworld: ..."
+    // D. Newer Forge: "Dim minecraft:overworld: ..."
     if (!name) {
       m = rawLine.match(/^\s*Dim(?:ension)?\s+([A-Za-z][\w]*:[A-Za-z][\w.\-]*)\s*:/i);
       if (m) name = m[1];
     }
 
-    // NeoForge 1.21+: bare "minecraft:overworld: Mean tick time: ..."
+    // E. NeoForge with namespace: "minecraft:overworld: Mean tick time: ..."
     if (!name) {
       m = rawLine.match(/^\s*([A-Za-z][\w]*:[A-Za-z][\w.\-]*)\s*:\s*Mean tick time/i);
       if (m) name = m[1];
@@ -241,11 +280,19 @@ async function readServerPings(rconConfig) {
 // One call gathers everything we know how to read; failures are surfaced
 // per-field instead of aborting the whole probe.
 async function readServerHealth(rconConfig) {
-  const [tps, mspt, pings] = await Promise.all([
+  const [tps, msptInitial, pings] = await Promise.all([
     readServerTps(rconConfig),
     readServerMspt(rconConfig),
     readServerPings(rconConfig)
   ]);
+  // NeoForge / modern Forge already report mspt inside the tps reply
+  // ("Overall: ... (5.265 ms/tick)"), so when the spark/mspt probe came back
+  // empty (spark not installed, or its async output didn't fit in a single
+  // RCON reply) we fill MSPT from the TPS line itself.
+  let mspt = msptInitial;
+  if ((!mspt || !mspt.ok) && tps && tps.ok && Number.isFinite(tps.mspt)) {
+    mspt = { ok: true, command: tps.command, avg: tps.mspt, peak: null, raw: tps.raw, derived: true };
+  }
   // Try to reuse the TPS reply for dimension data first (so we don't
   // double-issue the same RCON command). If that yields nothing — typically
   // when `spark tps` won the race and gave only the overall figure — fall
