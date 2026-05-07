@@ -39,6 +39,24 @@ test("parseMsptLine returns null for empty or non-matching", () => {
   assert.equal(parseMsptLine("nothing relevant"), null);
 });
 
+test("parseMsptLine rejects NeoForge /tick command output (target tick rate)", () => {
+  // Regression for the bug where the resource panel showed "p95 20.0 ·
+  // peak 20.0" because the /tick command's "20.0 per second" reading
+  // was harvested as MSPT.
+  assert.equal(parseMsptLine("Target tick rate: 20.0 per second."), null);
+  assert.equal(parseMsptLine("[Server thread/INFO]: The current target tick rate is 20.0."), null);
+  assert.equal(parseMsptLine("Server is running at 20.0 ticks per second"), null);
+});
+
+test("parseMsptLine still accepts proper MSPT replies", () => {
+  // Spark / Paper-style outputs continue to work because "ms" is anchored
+  // to the number.
+  assert.equal(parseMsptLine("Server tick: avg 5.21ms, max 12.4ms").avg, 5.21);
+  assert.equal(parseMsptLine("Mean tick time: 5.21 ms").avg, 5.21);
+  // Peak picked up from the second number when "peak"/"max" is mentioned.
+  assert.equal(parseMsptLine("avg 5.21 ms, peak 12.4 ms").peak, 12.4);
+});
+
 test("parsePingLines extracts and dedups player pings", () => {
   const text = [
     "Player Pings:",
