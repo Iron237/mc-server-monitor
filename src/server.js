@@ -14,7 +14,7 @@ const { createAlertEngine } = require("./lib/alerts");
 const { createWebhookDispatcher } = require("./lib/webhooks");
 const { createWorldSizeSampler } = require("./lib/worldSize");
 const { collectSystemResources, collectAllServerProcesses } = require("./lib/processMon");
-const { importLogBackfill, extractRecentPings, listLogFiles } = require("./lib/logBackfill");
+const { importLogBackfill, extractRecentPings, listLogFiles, parseFileSessions } = require("./lib/logBackfill");
 const {
   loadPlayerStats,
   ensureServerStats,
@@ -158,6 +158,69 @@ const server = http.createServer(async (request, response) => {
     //
     //   curl -H "Authorization: Bearer $TOKEN" \
     //        "http://localhost:3000/api/debug/rcon/server1?cmd=neoforge%20tps"
+    // Diagnose why per-player ping is empty. Walks the same log files the
+    // pollServer pipeline scans and reports each step's output: probe fire
+    // time, files seen, raw ping events, deduped extraction, current
+    // serverState.pings.
+    if (parsed.pathname.startsWith("/api/debug/pings/")) {
+      const serverId = decodeURIComponent(parsed.pathname.slice("/api/debug/pings/".length));
+      const serverState = findServerState(serverId);
+      const serverConfig = findServerConfig(serverId);
+      if (!serverState || !serverConfig) { sendJson(response, 404, { error: "Unknown server id" }); return; }
+      const result = {
+        serverId,
+        config: {
+          rconEnabled: serverConfig.rconEnabled,
+          logPath: serverConfig.logPath,
+          logBackfillEnabled: serverConfig.logBackfillEnabled,
+          sparkPingProbeIntervalMs: config.sparkPingProbeIntervalMs,
+          sparkPingMaxAgeMs: config.sparkPingMaxAgeMs
+        },
+        probe: {
+          lastFireAt: serverState.lastSparkPingFireAt || null,
+          lastTargets: serverState.lastSparkPingTargets || []
+        },
+        currentServerStatePings: serverState.pings,
+        logFilesScanned: [],
+        sparkPingEventsByFile: [],
+        extractionResult: []
+      };
+      if (serverConfig.logPath) {
+        try {
+          const files = listLogFiles(serverConfig.logPath, 4);
+          for (const f of files) {
+            result.logFilesScanned.push({
+              name: f.name,
+              path: f.path,
+              size: f.size,
+              mtime: new Date(f.mtimeMs).toISOString(),
+              ageSec: Math.round((Date.now() - f.mtimeMs) / 1000)
+            });
+            try {
+              const events = parseFileSessions(f);
+              const pings = events.filter((e) => e.action === "ping");
+              result.sparkPingEventsByFile.push({
+                file: f.name,
+                totalEvents: events.length,
+                pingEvents: pings.length,
+                lastFew: pings.slice(-10).map((p) => ({
+                  player: p.player,
+                  ms: p.ms,
+                  at: new Date(p.eventTime).toISOString()
+                }))
+              });
+            } catch (error) {
+              result.sparkPingEventsByFile.push({ file: f.name, error: error.message });
+            }
+          }
+          result.extractionResult = extractRecentPings(files, config.sparkPingMaxAgeMs);
+        } catch (error) {
+          result.error = error.message;
+        }
+      }
+      sendJson(response, 200, result);
+      return;
+    }
     if (parsed.pathname.startsWith("/api/debug/rcon/")) {
       const serverId = decodeURIComponent(parsed.pathname.slice("/api/debug/rcon/".length));
       const serverConfig = findServerConfig(serverId);
@@ -367,18 +430,34 @@ async function pollServer(serverState, now, processes) {
 
       // Spark broadcasts ping replies asynchronously to chat / console so
       // the synchronous RCON response is empty. Periodically issue
-      // `spark ping` (no --player) and rely on the log-tail pipeline to
-      // pick up the broadcast on the next poll.
+      // `spark ping --player <name>` for each currently-online player —
+      // that's the form whose log output (`[⚡] Player X has Y ms ping.`)
+      // we have a verified parser for. The plain `spark ping` (no args)
+      // emits a multi-line summary in some spark versions that doesn't
+      // match the per-player line format.
       if (serverConfig.logBackfillEnabled && serverConfig.logPath) {
         const lastFire = sparkPingLastFire.get(serverState.id) || 0;
         if (now - lastFire >= config.sparkPingProbeIntervalMs) {
           sparkPingLastFire.set(serverState.id, now);
-          rconCommand({
+          const onlineNames = (queryResult && queryResult.ok && Array.isArray(queryResult.players))
+            ? queryResult.players
+            : (statusResult.samplePlayers || []).map((p) => p && (p.name || p.id)).filter(Boolean);
+          const rconOpts = {
             host: serverConfig.rconHost || serverConfig.host,
             port: serverConfig.rconPort,
             password: serverConfig.rconPassword,
             timeoutMs: config.rconTimeoutMs
-          }, "spark ping").catch(() => {});
+          };
+          // Belt-and-braces: also issue the no-args form (some spark
+          // versions still emit per-player lines on it). Failures are
+          // expected and silenced.
+          rconCommand(rconOpts, "spark ping").catch(() => {});
+          for (const name of onlineNames) {
+            if (!/^[A-Za-z0-9_]{3,16}$/.test(name)) continue; // safety: don't inject
+            rconCommand(rconOpts, `spark ping --player ${name}`).catch(() => {});
+          }
+          serverState.lastSparkPingFireAt = new Date(now).toISOString();
+          serverState.lastSparkPingTargets = onlineNames;
         }
       }
     } else {
