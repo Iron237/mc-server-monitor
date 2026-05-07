@@ -114,16 +114,41 @@ function parseTpsLine(text) {
 //   spark:  "Tick lengths (ms) from last 5s ... avg 5.21, peak 12.4"
 //   paper:  "Server tick: avg 5.21ms, max 12.4ms"
 //   forge:  "Mean tick time: 5.21 ms"
-// First number is avg/current, second (if present) is peak.
+//
+// We need an explicit "ms" anchored to the number; NeoForge 1.21's `/tick`
+// command returns "Target tick rate: 20.0 per second" which previously got
+// mistaken for an MSPT reading because the line contains "tick" + a decimal.
 function parseMsptLine(text) {
   if (!text) return null;
   const stripped = stripFormatting(text);
-  if (!/mspt|tick|ms\b/i.test(stripped)) return null;
-  const numbers = [...stripped.matchAll(/(\d+\.\d+)/g)].map((m) => Number(m[1]));
-  if (numbers.length === 0) return null;
-  const [avg, peak = null] = numbers;
+
+  // Reject the NeoForge `/tick` command — it reports the *target* tick
+  // rate, not tick duration. Without this guard "20.0 per second" was
+  // harvested as MSPT and the dashboard showed "p95 20.0 · peak 20.0".
+  if (/per\s+second/i.test(stripped) || /tick\s*rate/i.test(stripped)) return null;
+
+  // Body must hint at duration (ms / mspt / tick time). \b doesn't help
+  // between a digit and a letter (both are word chars), so we use letter-only
+  // boundaries — "5.21ms" still matches, "msconfig" doesn't.
+  if (!/(?<![A-Za-z])(?:ms|mspt|tick\s*time)(?![A-Za-z])/i.test(stripped)) return null;
+
+  // Prefer labelled values; fall back to "<number> ms".
+  let avg = null;
+  const labeled = stripped.match(/(?:avg|mean|current|now)[^0-9]{0,16}(\d+(?:\.\d+)?)/i)
+    || stripped.match(/Mean\s*tick\s*time:?\s*(\d+(?:\.\d+)?)/i);
+  if (labeled) avg = Number(labeled[1]);
+  if (!Number.isFinite(avg)) {
+    const direct = stripped.match(/(\d+(?:\.\d+)?)\s*ms\b(?!\s*ago)/i);
+    if (direct) avg = Number(direct[1]);
+  }
   if (!Number.isFinite(avg) || avg <= 0 || avg > 5000) return null;
-  return { avg, peak: Number.isFinite(peak) ? peak : null, raw: stripped };
+
+  const peakMatch = stripped.match(/(?:peak|max)[^0-9]{0,16}(\d+(?:\.\d+)?)/i);
+  return {
+    avg,
+    peak: peakMatch ? Number(peakMatch[1]) : null,
+    raw: stripped
+  };
 }
 
 // Per-player ping output via spark / similar:
@@ -256,7 +281,10 @@ async function readDimensionStats(rconConfig) {
 }
 
 async function readServerMspt(rconConfig) {
-  const candidates = ["spark mspt", "mspt", "tick"];
+  // `tick` is intentionally excluded — NeoForge 1.21's `/tick` command
+  // reports the *target* tick rate ("20.0 per second"), not MSPT, and
+  // its output happily matches a `\d+\.\d+` near the word "tick".
+  const candidates = ["spark mspt", "mspt"];
   for (const cmd of candidates) {
     const result = await rconCommand(rconConfig, cmd);
     if (!result.ok) continue;

@@ -384,13 +384,13 @@ function renderTps(tps, mspt, msptStats) {
     }
   }
   if (msptOk) {
-    parts.push(`MSPT ${fmt(mspt.avg)}${Number.isFinite(mspt.peak) ? ` (peak ${fmt(mspt.peak)})` : ""}`);
+    parts.push(`MSPT ${fmt(mspt.avg)}ms${Number.isFinite(mspt.peak) ? ` (peak ${fmt(mspt.peak)}ms)` : ""}`);
   }
   // Append our monitor-side rolling p95 / peak when spark didn't give us
   // its own peak figure. Window text describes the sampled minutes.
   if (statsOk && (!msptOk || !Number.isFinite(mspt.peak))) {
     const minutes = Math.round((msptStats.windowMs || 0) / 60000);
-    parts.push(`p95 ${fmt(msptStats.p95)} · peak ${fmt(msptStats.peak)} (${minutes}min)`);
+    parts.push(`p95 ${fmt(msptStats.p95)}ms · peak ${fmt(msptStats.peak)}ms (${minutes}min)`);
   }
   elements.tpsLine.textContent = parts.join(" · ");
   elements.tpsLine.classList.toggle("hot", tpsOk && Number.isFinite(tps.tps1m) && tps.tps1m < 10);
